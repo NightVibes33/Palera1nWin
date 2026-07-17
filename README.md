@@ -16,8 +16,10 @@ Production-grade **Windows GUI** for [palera1n](https://github.com/palera1n/pale
 - **UsbDk uninstall** — one-click removal of the conflicting UsbDk filter driver
 - Fetch / select palera1n versions from GitHub Releases
 - Settings: rootless/rootful, safe mode, verbose boot (`-V`), toolchain root, WSL distro
-- Logs + Setup doctor checks (WSL, usbipd, toolchain, UsbDk conflict detection)
-- Bundled `wdi-simple.exe` + `zadig.exe` — no manual driver tool build required
+- **Portable** — settings, logs, and runtime files live next to the exe (no `AppData` pollution)
+- Logs + Setup doctor checks (WSL, usbipd, toolchain, UsbDk conflict detection, WSL runtime)
+- **Bundled toolchain** — `openra1n.exe`, `palera1n.ps1` launcher, `palera1n-linux-x86_64` binary, `wdi-simple.exe`, `zadig.exe`, `gaster.exe`, and provision scripts ship in `toolchain\` next to the exe. No separate toolchain download required.
+- **One-click Provision WSL** — installs the `palera1n` runtime + `pln-run.sh` wrapper into `/opt/palera1n/` inside your WSL distro from the Setup tab (no manual `setup.ps1`).
 
 ---
 
@@ -51,10 +53,12 @@ Production-grade **Windows GUI** for [palera1n](https://github.com/palera1n/pale
 
 Grab the latest `Palera1nWin-win-x64.zip` from [Releases](../../releases). Unzip to any folder. **Run as Administrator** (right-click → Run as administrator) — this is required for driver installation and `usbipd` detach/attach.
 
+The release zip is self-contained: the `Palera1nWin.exe` and a `toolchain\` folder (with `openra1n.exe`, the WSL `palera1n` binary, launcher scripts, and driver tooling) ship together. No extra downloads.
+
 ### 3. First-run setup
 
-1. Open the **Setup** tab. The app checks WSL, usbipd, and the toolchain automatically.
-2. If the toolchain is missing, download the **Palera1n-Windows toolchain** and set its path in **Settings**.
+1. Open the **Setup** tab. The app checks WSL, usbipd, the bundled toolchain, and the WSL `palera1n` runtime automatically.
+2. Click **Provision WSL** (one-time). This installs the `palera1n` binary + `pln-run.sh` wrapper into `/opt/palera1n/` inside your WSL distro and pulls the runtime packages (`usbmuxd`, `usbutils`, `libusb`, `usbip`). Accept the UAC prompt if it appears.
 3. Connect your iPhone via a **USB-A to Lightning** cable (USB-C adapters are unreliable for DFU).
 
 ### 4. Jailbreak
@@ -100,7 +104,7 @@ After a jailbreak session, the Apple USB device may still be on the `libusbK` dr
 
 ### "openra1n exited with code -1073741819 (ACCESS_VIOLATION)"
 The DFU device was on the wrong driver (`VBoxUSB`/`WinUSB` instead of `libusbK`). The app auto-fixes this, but if it persists:
-- Close the app, open Zadig (bundled in `native\zadig.exe`), select `Apple Mobile USB (DFU)` → replace driver with `libusbK` → retry.
+- Close the app, open Zadig (bundled in `toolchain\dist\native\zadig.exe`), select `Apple Mobile USB (DFU)` → replace driver with `libusbK` → retry.
 
 ### "PongoOS USB device never appeared"
 `openra1n` ran but PongoOS didn't enumerate. Usually a stale YOLO state:
@@ -127,7 +131,7 @@ Windows may race the driver assignment. The global watchdog re-applies `libusbK`
 - Disconnect other USB devices, use a direct motherboard USB port (no hub), and run the app as Administrator.
 
 ### Logs
-Session logs are saved to `%LOCALAPPDATA%\Palera1nWin\logs\session-YYYYMMDD-HHmmss.log`. Check the **Logs** tab in the app or open the latest file for troubleshooting.
+Session logs are saved **next to the exe** in `logs\session-YYYYMMDD-HHmmss.log` (portable). Check the **Logs** tab in the app or open the latest file for troubleshooting.
 
 ---
 
@@ -148,6 +152,15 @@ dotnet publish src\Palera1nWin.App -c Release -r win-x64 --self-contained true -
 ```
 
 The `native\` folder (`wdi-simple.exe`, `zadig.exe`) is copied to the output automatically by the build target.
+
+To build a **release zip** (exe + bundled toolchain), publish to a clean folder then stage the toolchain:
+
+```powershell
+dotnet publish src\Palera1nWin.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-v100
+# Stage the runtime toolchain (openra1n, scripts, palera1n-linux binary, provision scripts)
+# into publish-v100\toolchain\ — see the bundle script in tools\.
+Compress-Archive -Path publish-v100\* -DestinationPath Palera1nWin-win-x64.zip -Force
+```
 
 ### Architecture
 

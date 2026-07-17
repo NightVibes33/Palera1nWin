@@ -25,7 +25,11 @@ bld/
 [Ll]ogs/
 artifacts/
 publish/
+publish-v*/
 dist/
+
+# Release artifacts
+Palera1nWin-win-x64.zip
 
 # Visual Studio / VS Code
 .vs/

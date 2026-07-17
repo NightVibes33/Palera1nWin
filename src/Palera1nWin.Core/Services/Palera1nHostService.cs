@@ -1,5 +1,6 @@
 using Palera1nWin.Core.Interaction;
 using Palera1nWin.Core.Models;
+using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Util;
 
 namespace Palera1nWin.Core.Services;
@@ -59,6 +60,13 @@ public sealed class Palera1nHostService
         var interactivePrompts = enableDfuPrompt ? DfuInteractivePrompts : null;
         ProcessPromptHandler? promptHandler = enableDfuPrompt ? HandleDfuReadyPromptAsync : null;
 
+        // Tell the launcher where the GUI writes the DFU-enter signal file.
+        // palera1n.ps1 reads $env:PALERA1NWIN_RUNTIME (falls back to LocalAppData).
+        var env = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PALERA1NWIN_RUNTIME"] = AppSettings.RuntimeDirectory,
+        };
+
         var cmdPath = Paths.GetPalera1nCmd(toolchainRoot);
         if (File.Exists(cmdPath))
         {
@@ -67,6 +75,7 @@ public sealed class Palera1nHostService
                 "cmd.exe",
                 new[] { "/c", cmdPath }.Concat(args).ToArray(),
                 workingDirectory: toolchainRoot,
+                environment: env,
                 cancellationToken: cancellationToken,
                 onStdoutLine: line => Emit("palera1n", line),
                 onStderrLine: line => Emit("palera1n", line, isError: true),
@@ -94,6 +103,7 @@ public sealed class Palera1nHostService
                 "powershell.exe",
                 psArgs,
                 workingDirectory: toolchainRoot,
+                environment: env,
                 cancellationToken: cancellationToken,
                 onStdoutLine: line => Emit("palera1n", line),
                 onStderrLine: line => Emit("palera1n", line, isError: true),

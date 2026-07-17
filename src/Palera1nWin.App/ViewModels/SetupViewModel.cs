@@ -27,6 +27,7 @@ public sealed class SetupViewModel : ObservableObject
     private readonly Action<string> _setStatus;
     private readonly UsbipdService _usbipdService = new();
     private readonly WslService _wslService;
+    private readonly WslProvisionService _wslProvisionService;
     private string _toolchainRoot = string.Empty;
     private string _doctorSummary = "Run environment checks to validate your setup.";
     private bool _isBusy;
@@ -42,6 +43,7 @@ public sealed class SetupViewModel : ObservableObject
         _logService = logService;
         _setStatus = setStatus;
         _wslService = new WslService(settings.WslDistro);
+        _wslProvisionService = new WslProvisionService(_wslService);
 
         _toolchainRoot = settings.ToolchainRoot;
 
@@ -49,6 +51,7 @@ public sealed class SetupViewModel : ObservableObject
         RunDoctorCommand = new AsyncRelayCommand(RunDoctorAsync, () => !IsBusy);
         InstallDriversCommand = new AsyncRelayCommand(InstallDriversAsync, () => !IsBusy);
         UninstallUsbDkCommand = new AsyncRelayCommand(UninstallUsbDkAsync, () => !IsBusy);
+        ProvisionWslCommand = new AsyncRelayCommand(ProvisionWslAsync, () => !IsBusy);
         RefreshUsbDkCommand = new RelayCommand(RefreshUsbDkState);
     }
 
@@ -100,6 +103,8 @@ public sealed class SetupViewModel : ObservableObject
     public AsyncRelayCommand InstallDriversCommand { get; }
 
     public AsyncRelayCommand UninstallUsbDkCommand { get; }
+
+    public AsyncRelayCommand ProvisionWslCommand { get; }
 
     public RelayCommand RefreshUsbDkCommand { get; }
 
@@ -178,6 +183,33 @@ public sealed class SetupViewModel : ObservableObject
                 Name = "WSL distro",
                 Detail = distro ?? "No WSL distro detected. Install Ubuntu or set WSL distro in Settings.",
                 Passed = !string.IsNullOrWhiteSpace(distro),
+            });
+
+            // WSL runtime provisioning: is /opt/palera1n/pln-run.sh installed?
+            bool wslProvisioned = false;
+            if (!string.IsNullOrWhiteSpace(distro))
+            {
+                try
+                {
+                    wslProvisioned = await _wslProvisionService
+                        .IsProvisionedAsync(distro)
+                        .ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    _logService.Append("setup", $"WSL provision check failed: {ex.Message}", isError: true);
+                }
+            }
+
+            DoctorChecks.Add(new DoctorCheckItem
+            {
+                Name = "WSL palera1n runtime",
+                Detail = string.IsNullOrWhiteSpace(distro)
+                    ? "Install a WSL distro first."
+                    : wslProvisioned
+                        ? $"Provisioned in {distro} (/opt/palera1n/pln-run.sh)."
+                        : $"Not provisioned in {distro}. Click 'Provision WSL' below (one-time).",
+                Passed = wslProvisioned,
             });
 
             DoctorChecks.Add(new DoctorCheckItem
@@ -345,6 +377,68 @@ public sealed class SetupViewModel : ObservableObject
             DoctorSummary = $"UsbDk uninstall error: {ex.Message}";
             _logService.Append("setup", ex.Message, isError: true);
             _setStatus("UsbDk uninstall failed.");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ProvisionWslAsync()
+    {
+        IsBusy = true;
+        _setStatus("Provisioning WSL runtime...");
+        _logService.Append("setup", "Starting WSL provisioning...");
+
+        try
+        {
+            _settings.Clamp();
+            _settings.Save();
+
+            var resolved = Paths.ResolveToolchainRoot(ToolchainRoot);
+            if (resolved is null)
+            {
+                var msg = "Toolchain root is not configured or does not exist. Set it in Settings first.";
+                DoctorSummary = msg;
+                _logService.Append("setup", msg, isError: true);
+                _setStatus("Provision WSL: toolchain missing.");
+                return;
+            }
+
+            DoctorSummary = "Provisioning WSL (installing runtime + palera1n binary)... this can take a few minutes on first run.";
+            Action<string> progress = line =>
+            {
+                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    DoctorSummary = line;
+                    _logService.Append("wsl-provision", line, isError: false);
+                });
+            };
+
+            var result = await _wslProvisionService
+                .ProvisionAsync(resolved, _settings.WslDistro, progress)
+                .ConfigureAwait(true);
+
+            var provisioned = result.Succeeded
+                && await _wslProvisionService.IsProvisionedAsync(_settings.WslDistro).ConfigureAwait(true);
+
+            DoctorSummary = provisioned
+                ? "WSL provisioned. palera1n runtime installed in /opt/palera1n/."
+                : $"WSL provisioning failed (exit {result.ExitCode}). See Logs for details.";
+            _setStatus(provisioned ? "WSL provisioned." : "WSL provisioning failed.");
+            _logService.Append("setup", DoctorSummary, isError: !provisioned);
+
+            System.Windows.MessageBox.Show(
+                DoctorSummary,
+                "Provision WSL",
+                System.Windows.MessageBoxButton.OK,
+                provisioned ? System.Windows.MessageBoxImage.Information : System.Windows.MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            DoctorSummary = $"WSL provisioning error: {ex.Message}";
+            _logService.Append("setup", ex.Message, isError: true);
+            _setStatus("WSL provisioning failed.");
         }
         finally
         {

@@ -10,9 +10,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Description>Palera1nWin — production Windows GUI for palera1n (hybrid openra1n + WSL).</Description>
     <ApplicationIcon Condition="Exists('..\..\assets\icon.ico')">..\..\assets\icon.ico</ApplicationIcon>
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Palera1nWin.Core\Palera1nWin.Core.csproj" />

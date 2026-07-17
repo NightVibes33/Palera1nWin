@@ -41,9 +41,20 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
               <ui:Button Content="Run checks" Command="{Binding RunDoctorCommand}" Margin="0,0,8,0"/>
+              <ui:Button Content="Provision WSL" Command="{Binding ProvisionWslCommand}" Margin="0,0,8,0"/>
               <ui:Button Content="Install drivers" Appearance="Primary" Command="{Binding InstallDriversCommand}"/>
             </StackPanel>
           </Grid>
+
+          <!-- WSL provisioning hint -->
+          <Border Margin="0,14,0,0" Padding="12,10" CornerRadius="6"
+                  Background="{DynamicResource ControlFillColorDefaultBrush}">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+              <TextBlock Text="WSL palera1n runtime" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+              <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0" TextWrapping="Wrap"
+                         Text="One-time setup: installs the palera1n binary + runtime packages (usbmuxd, usbip, libusb) into your WSL distro so the jailbreak can run. Run 'Run checks' first, then 'Provision WSL' if the WSL palera1n runtime check fails."/>
+            </StackPanel>
+          </Border>
 
           <!-- UsbDk conflict banner + uninstall button (visible only when UsbDk is detected) -->
           <Border Margin="0,14,0,0" Padding="12,10" CornerRadius="6"
