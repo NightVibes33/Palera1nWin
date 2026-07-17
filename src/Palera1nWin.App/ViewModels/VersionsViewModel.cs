@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Palera1nWin.App.Mvvm;
 using Palera1nWin.App.Services;
 using Palera1nWin.Core.Releases;
+using Palera1nWin.Core.Services;
 using Palera1nWin.Core.Settings;
 
 namespace Palera1nWin.App.ViewModels;
@@ -25,6 +26,7 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
     private readonly LogService _logService;
     private readonly Action<string> _setStatus;
     private readonly GitHubReleasesClient _releasesClient = new();
+    private readonly WslProvisionService _wslProvisionService;
     private ReleaseItemViewModel? _selectedRelease;
     private string _downloadStatus = "No download in progress.";
     private bool _isBusy;
@@ -34,12 +36,13 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
         _settings = settings;
         _logService = logService;
         _setStatus = setStatus;
+        _wslProvisionService = new WslProvisionService(settings.WslDistro);
 
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy);
         DownloadCommand = new AsyncRelayCommand(DownloadSelectedAsync, () => !IsBusy && SelectedRelease is not null);
 
-        BundledVersionNote = "The bundled hybrid toolchain currently ships with palera1n v2.3. "
-            + "Download a release here to update the WSL runtime binary.";
+        BundledVersionNote = "The bundled toolchain ships with palera1n v2.3. Selecting a release and clicking "
+            + "Download installs that version into WSL (/opt/palera1n/palera1n) so the jailbreak uses it.";
     }
 
     public string BundledVersionNote { get; }
@@ -163,9 +166,48 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
             _settings.SelectedReleaseTag = SelectedRelease.TagName;
             _settings.Save();
 
-            DownloadStatus = $"Saved to {destination}";
-            _setStatus("Release download completed.");
-            _logService.Append("versions", DownloadStatus);
+            _logService.Append("versions", $"Downloaded {SelectedRelease.TagName} to {destination}");
+
+            // Downloading is not enough — the jailbreak runs /opt/palera1n/palera1n
+            // inside WSL. Install the downloaded binary there so the selected version
+            // is the one that actually runs (otherwise it stays on the bundled 2.3).
+            DownloadStatus = $"Installing {SelectedRelease.TagName} into WSL...";
+            _setStatus($"Activating {SelectedRelease.TagName} in WSL...");
+            try
+            {
+                var installResult = await _wslProvisionService.InstallPalera1nBinaryAsync(
+                    destination,
+                    distro: null,
+                    onOutput: line => System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        DownloadStatus = line;
+                        _logService.Append("versions", line);
+                    })).ConfigureAwait(true);
+
+                var active = await _wslProvisionService.GetInstalledVersionAsync().ConfigureAwait(true);
+                if (installResult.Succeeded)
+                {
+                    DownloadStatus = active is not null
+                        ? $"Active in WSL: {active}  (selected {SelectedRelease.TagName})"
+                        : $"{SelectedRelease.TagName} installed into WSL (/opt/palera1n/palera1n).";
+                    _setStatus($"palera1n {SelectedRelease.TagName} is now active.");
+                }
+                else
+                {
+                    DownloadStatus = $"Downloaded {SelectedRelease.TagName}, but WSL install returned exit "
+                        + $"{installResult.ExitCode}. Provision WSL from the Setup tab, then re-download.";
+                    _setStatus("Downloaded, WSL activation incomplete.");
+                }
+
+                _logService.Append("versions", DownloadStatus);
+            }
+            catch (Exception wslEx)
+            {
+                DownloadStatus = $"Downloaded {SelectedRelease.TagName} to {destination}. "
+                    + $"Could not activate in WSL ({wslEx.Message}). Install a WSL distro / Provision WSL, then re-download.";
+                _setStatus("Downloaded; WSL not available to activate.");
+                _logService.Append("versions", DownloadStatus, isError: true);
+            }
         }
         catch (Exception ex)
         {

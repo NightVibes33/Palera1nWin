@@ -433,15 +433,26 @@ public sealed class SetupViewModel : ObservableObject
                 });
             };
 
+            // If the user downloaded a specific release from the Versions tab, keep it:
+            // provision-wsl.sh installs the bundled 2.3 binary, so re-apply the download afterwards.
+            var downloadedBinary = Path.Combine(AppSettings.RuntimeDirectory, "palera1n-linux-x86_64");
+            var preferBinary = File.Exists(downloadedBinary) ? downloadedBinary : null;
+
             var result = await _wslProvisionService
-                .ProvisionAsync(resolved, distro, progress)
+                .ProvisionAsync(resolved, distro, progress, preferBinaryPath: preferBinary)
                 .ConfigureAwait(true);
 
             var provisioned = result.Succeeded
                 && await _wslProvisionService.IsProvisionedAsync(distro).ConfigureAwait(true);
 
+            var activeVersion = provisioned
+                ? await _wslProvisionService.GetInstalledVersionAsync(distro).ConfigureAwait(true)
+                : null;
+
             DoctorSummary = provisioned
-                ? "WSL provisioned. palera1n runtime installed in /opt/palera1n/."
+                ? activeVersion is not null
+                    ? $"WSL provisioned. Active runtime: {activeVersion} (/opt/palera1n/)."
+                    : "WSL provisioned. palera1n runtime installed in /opt/palera1n/."
                 : $"WSL provisioning failed (exit {result.ExitCode}). See Logs for details.";
             _setStatus(provisioned ? "WSL provisioned." : "WSL provisioning failed.");
             _logService.Append("setup", DoctorSummary, isError: !provisioned);

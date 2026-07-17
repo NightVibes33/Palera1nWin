@@ -18,6 +18,7 @@ public sealed class JailbreakViewModel : ObservableObject
     private bool _isRunning;
     private double _progress;
     private string _progressText = "Ready to start.";
+    private string _progressHint = string.Empty;
     private string _deviceModeLabel = "No device";
     private string _deviceModeBadgeBackground = "#26343F52";
     private string _deviceModeBadgeForeground = "#9AA3B8";
@@ -141,6 +142,16 @@ public sealed class JailbreakViewModel : ObservableObject
         private set => SetProperty(ref _progressText, value);
     }
 
+    /// <summary>
+    /// Optional hint shown to the right of the progress text for long-running
+    /// steps (e.g. "(Might take around a minute)" while palera1n sends payloads).
+    /// </summary>
+    public string ProgressHint
+    {
+        get => _progressHint;
+        private set => SetProperty(ref _progressHint, value);
+    }
+
     public string DeviceModeLabel
     {
         get => _deviceModeLabel;
@@ -182,6 +193,7 @@ public sealed class JailbreakViewModel : ObservableObject
         IsRunning = true;
         Progress = 0;
         ProgressText = "Starting jailbreak...";
+        ProgressHint = string.Empty;
         _setStatus("Jailbreak in progress...");
 
         try
@@ -225,6 +237,7 @@ public sealed class JailbreakViewModel : ObservableObject
         finally
         {
             IsRunning = false;
+            ProgressHint = string.Empty;
             _runCts?.Dispose();
             _runCts = null;
             RefreshLogPreview();
@@ -248,6 +261,11 @@ public sealed class JailbreakViewModel : ObservableObject
         {
             Progress = e.Percent ?? 0;
             ProgressText = e.Message;
+            // palera1n's payload stage (fuse lock, sep, ramdisk, overlay, bootx) is
+            // the longest single step — reassure the user it isn't stuck.
+            ProgressHint = string.Equals(e.Stage, nameof(JailbreakStage.RunningPalera1n), StringComparison.Ordinal)
+                ? "(Might take around a minute)"
+                : string.Empty;
         });
     }
 

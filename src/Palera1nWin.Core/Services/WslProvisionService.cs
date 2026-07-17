@@ -63,14 +63,98 @@ public sealed class WslProvisionService
     }
 
     /// <summary>
+    /// Returns the palera1n version string currently installed at
+    /// /opt/palera1n/palera1n (e.g. "palera1n 2.2.1-..."), or null if not present.
+    /// </summary>
+    public async Task<string?> GetInstalledVersionAsync(
+        string? distro = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _wsl.RunRootCommandAsync(
+            "test -x /opt/palera1n/palera1n && /opt/palera1n/palera1n --version 2>&1 | grep -m1 -Eo 'palera1n[ -][0-9][^ ]*' || true",
+            distro,
+            cancellationToken).ConfigureAwait(false);
+
+        var line = result.StandardOutput
+            .Replace("\0", "", StringComparison.Ordinal)
+            .Split('\n', '\r')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("palera1n", StringComparison.OrdinalIgnoreCase));
+
+        return string.IsNullOrWhiteSpace(line) ? null : line;
+    }
+
+    /// <summary>
+    /// Installs a specific palera1n Linux binary into /opt/palera1n/palera1n
+    /// (replacing whatever version was there). Used by the Versions tab to
+    /// "activate" a downloaded release so the jailbreak actually runs it, instead
+    /// of always using the bundled binary that provision-wsl.sh installs.
+    /// </summary>
+    public async Task<ProcessResult> InstallPalera1nBinaryAsync(
+        string windowsBinaryPath,
+        string? distro = null,
+        Action<string>? onOutput = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(windowsBinaryPath) || !File.Exists(windowsBinaryPath))
+        {
+            throw new FileNotFoundException("palera1n binary not found.", windowsBinaryPath);
+        }
+
+        var resolvedDistro = distro;
+        if (string.IsNullOrWhiteSpace(resolvedDistro))
+        {
+            resolvedDistro = await _wsl.ResolveDistroAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedDistro))
+        {
+            throw new InvalidOperationException(
+                "No WSL distro detected. Install one first:  wsl --install -d Ubuntu  (admin), then re-run.");
+        }
+
+        var wslBin = ConvertToWslPath(windowsBinaryPath);
+        var wslBinEsc = wslBin.Replace("'", "'\\''", StringComparison.Ordinal);
+        onOutput?.Invoke($"Installing palera1n binary into {resolvedDistro}:/opt/palera1n/palera1n ...");
+
+        // Copy the binary off the /mnt share (install applies 0755 to the copy),
+        // symlink it onto PATH, then echo the resulting version for confirmation.
+        var bash =
+            "set -e; install -d /opt/palera1n; " +
+            $"install -m755 '{wslBinEsc}' /opt/palera1n/palera1n; " +
+            "ln -sfn /opt/palera1n/palera1n /usr/local/bin/palera1n; " +
+            "/opt/palera1n/palera1n --version 2>&1 | grep -m1 -Eo 'palera1n[ -][0-9][^ ]*' || true";
+
+        var args = new List<string>
+        {
+            "-d", resolvedDistro,
+            "-u", "root",
+            "--",
+            "bash", "-lc",
+            bash,
+        };
+
+        return await ProcessRunner.RunAsync(
+            "wsl.exe",
+            args,
+            cancellationToken: cancellationToken,
+            onStdoutLine: onOutput,
+            onStderrLine: line => onOutput?.Invoke(line)).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Runs provision-wsl.sh for the given toolchain root. Streams each output
     /// line to <paramref name="onOutput"/>. Returns the WSL exit code.
+    /// When <paramref name="preferBinaryPath"/> points to a downloaded release
+    /// binary, it is installed over the bundled one after provisioning so the
+    /// user's selected version survives a re-provision.
     /// </summary>
     public async Task<ProcessResult> ProvisionAsync(
         string toolchainRoot,
         string? distro = null,
         Action<string>? onOutput = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? preferBinaryPath = null)
     {
         if (string.IsNullOrWhiteSpace(toolchainRoot) || !Directory.Exists(toolchainRoot))
         {
@@ -125,11 +209,23 @@ public sealed class WslProvisionService
             bashCommand,
         };
 
-        return await ProcessRunner.RunAsync(
+        var provisionResult = await ProcessRunner.RunAsync(
             "wsl.exe",
             args,
             cancellationToken: cancellationToken,
             onStdoutLine: onOutput,
             onStderrLine: line => onOutput?.Invoke(line)).ConfigureAwait(false);
+
+        // provision-wsl.sh always installs the bundled binary. If the user has
+        // downloaded a specific release, re-apply it so their choice sticks.
+        if (provisionResult.Succeeded
+            && !string.IsNullOrWhiteSpace(preferBinaryPath)
+            && File.Exists(preferBinaryPath))
+        {
+            await InstallPalera1nBinaryAsync(preferBinaryPath, resolvedDistro, onOutput, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return provisionResult;
     }
 }

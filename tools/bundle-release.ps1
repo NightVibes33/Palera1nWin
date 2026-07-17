@@ -116,6 +116,19 @@ foreach ($r in $required) {
 $totalMB = [math]::Round((Get-ChildItem $tcDst -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
 Write-Host "[bundle] staged toolchain: $totalMB MB, $((Get-ChildItem $tcDst -Recurse -File).Count) files" -ForegroundColor Green
 
+# ---- 3b. license / attribution files (required: we redistribute 3rd-party bins) --
+Write-Host "[bundle] staging THIRD_PARTY_NOTICES.md + licenses\..." -ForegroundColor Cyan
+$noticeSrc = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+if (-not (Test-Path $noticeSrc)) { throw "THIRD_PARTY_NOTICES.md missing at repo root." }
+Copy-Item $noticeSrc (Join-Path $publishDir "THIRD_PARTY_NOTICES.md") -Force
+
+$licSrc = Join-Path $repoRoot "licenses"
+if (-not (Test-Path $licSrc)) { throw "licenses\ folder missing at repo root." }
+$licDst = Join-Path $publishDir "licenses"
+if (Test-Path $licDst) { Remove-Item $licDst -Recurse -Force }
+Copy-Item $licSrc $licDst -Recurse -Force
+Write-Host "[bundle] staged $((Get-ChildItem $licDst -File).Count) license files" -ForegroundColor Green
+
 # ---- 4. zip it -------------------------------------------------------------
 $zipPath = Join-Path $repoRoot $ZipName
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

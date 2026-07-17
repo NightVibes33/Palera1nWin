@@ -186,12 +186,24 @@ Compress-Archive -Path publish-v100\* -DestinationPath Palera1nWin-win-x64.zip -
 
 ## Credits
 
-- [palera1n](https://github.com/palera1n/palera1n) team
-- checkra1n / PongoOS / openra1n contributors
-- [libwdi](https://github.com/pbatard/libwdi) / [Zadig](https://zadig.akeo.ie/) (driver install)
-- [usbipd-win](https://github.com/dorssel/usbipd-win) (USB/IP bridging)
-- UI patterns inspired by [BitBroom](https://github.com/pwnapplehat/BitBroom) (WPF-UI Acrylic)
+Palera1nWin is a front-end. The actual jailbreak is powered by these projects,
+whose binaries it **bundles and redistributes** under their own licenses (see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses/` folder):
+
+- **[openra1n](https://github.com/mineek/openra1n)** by mineek — Windows checkm8 + PongoOS upload (Apache-2.0). Built from the [wh1te4ever/openra1n](https://github.com/wh1te4ever/openra1n) fork.
+- **[gaster](https://github.com/0x7ff/gaster)** by 0x7ff — checkm8 exploit, and the base openra1n builds on (Apache-2.0).
+- **[palera1n](https://github.com/palera1n/palera1n)** team — the Linux `palera1n` binary and PongoOS payloads (MIT).
+- **checkra1n team / PongoOS** — the checkm8 bootrom exploit and PongoOS pre-boot environment.
+- **[ra1npoc](https://github.com/kok3shidoll/ra1npoc)** by kok3shidoll — payloads embedded in openra1n.
+- **[libwdi](https://github.com/pbatard/libwdi) / [Zadig](https://zadig.akeo.ie/)** by Pete Batard — automated `libusbK` driver install (LGPL-3.0 / GPL-3.0).
+- **[libusb](https://github.com/libusb/libusb)** — USB access for openra1n/gaster (LGPL-2.1).
+- **[usbipd-win](https://github.com/dorssel/usbipd-win)** by Frans van Dorsselaer — USB/IP bridging to WSL.
+- UI patterns inspired by [BitBroom](https://github.com/pwnapplehat/BitBroom) (WPF-UI Acrylic).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Palera1nWin's own code is **MIT** — see [LICENSE](LICENSE).
+
+Bundled third-party binaries remain under their respective licenses (Apache-2.0,
+MIT, LGPL/GPL). Full texts are in [`licenses/`](licenses/) and the release archive.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the complete attribution.
