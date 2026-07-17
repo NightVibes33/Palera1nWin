@@ -111,16 +111,23 @@ public sealed class AppleUsbMonitor : IDisposable
 
             foreach (var obj in searcher.Get())
             {
-                var deviceId = obj["DeviceID"]?.ToString() ?? string.Empty;
-                var name = obj["Name"]?.ToString();
-                var status = obj["Status"]?.ToString();
-                var service = obj["Service"]?.ToString();
-                if (string.IsNullOrWhiteSpace(service))
+                try
                 {
-                    service = Drivers.DriverInstaller.ResolveServiceName(deviceId);
-                }
+                    var deviceId = obj["DeviceID"]?.ToString() ?? string.Empty;
+                    var name = obj["Name"]?.ToString();
+                    var status = obj["Status"]?.ToString();
+                    var service = obj["Service"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(service))
+                    {
+                        service = Drivers.DriverInstaller.ResolveServiceName(deviceId);
+                    }
 
-                results.Add(AppleUsbDevice.FromPnpEntity(deviceId, name, status, service));
+                    results.Add(AppleUsbDevice.FromPnpEntity(deviceId, name, status, service));
+                }
+                finally
+                {
+                    obj.Dispose();
+                }
             }
         }
         catch (ManagementException)

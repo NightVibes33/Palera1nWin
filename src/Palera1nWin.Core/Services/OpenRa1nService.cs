@@ -4,9 +4,10 @@ using Palera1nWin.Core.Util;
 
 namespace Palera1nWin.Core.Services;
 
-public sealed class OpenRa1nService
+public sealed class OpenRa1nService : IDisposable
 {
     private readonly AppleUsbMonitor _monitor;
+    private readonly bool _ownsMonitor;
     private readonly TimeSpan _pongoTimeout;
     private readonly TimeSpan _postUploadGrace;
     private readonly TimeSpan _stuckTimeout;
@@ -17,7 +18,17 @@ public sealed class OpenRa1nService
         TimeSpan? postUploadGrace = null,
         TimeSpan? stuckTimeout = null)
     {
-        _monitor = monitor ?? new AppleUsbMonitor();
+        if (monitor is null)
+        {
+            _monitor = new AppleUsbMonitor();
+            _ownsMonitor = true;
+        }
+        else
+        {
+            _monitor = monitor;
+            _ownsMonitor = false;
+        }
+
         _pongoTimeout = pongoTimeout ?? TimeSpan.FromMinutes(10);
         _postUploadGrace = postUploadGrace ?? TimeSpan.FromSeconds(90);
         // If openra1n produces no stdout for this long, it's hung (usually stale YOLO).
@@ -243,5 +254,13 @@ public sealed class OpenRa1nService
             Message = message,
             IsError = isError,
         });
+    }
+
+    public void Dispose()
+    {
+        if (_ownsMonitor)
+        {
+            _monitor.Dispose();
+        }
     }
 }

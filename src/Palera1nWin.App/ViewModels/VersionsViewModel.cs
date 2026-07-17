@@ -19,7 +19,7 @@ public sealed class ReleaseItemViewModel
         : "Unknown size";
 }
 
-public sealed class VersionsViewModel : ObservableObject
+public sealed class VersionsViewModel : ObservableObject, IDisposable
 {
     private readonly AppSettings _settings;
     private readonly LogService _logService;
@@ -173,5 +173,10 @@ public sealed class VersionsViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    public void Dispose()
+    {
+        _releasesClient.Dispose();
     }
 }

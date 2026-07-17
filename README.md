@@ -134,7 +134,8 @@ Session logs are saved to `%LOCALAPPDATA%\Palera1nWin\logs\session-YYYYMMDD-HHmm
 ## Build (developers)
 
 ```powershell
-cd E:\Work\Palera1nWin
+git clone https://github.com/pwnapplehat/Palera1nWin.git
+cd Palera1nWin
 dotnet build Palera1nWin.slnx -c Release
 dotnet test tests\Palera1nWin.Core.Tests -c Release
 dotnet run --project src\Palera1nWin.App -c Release

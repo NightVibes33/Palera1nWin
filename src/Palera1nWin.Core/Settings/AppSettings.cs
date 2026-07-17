@@ -5,7 +5,6 @@ namespace Palera1nWin.Core.Settings;
 
 public sealed class AppSettings
 {
-    private const string DefaultToolchainCandidate = @"E:\Work\Palera1n-Windows";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -56,15 +55,46 @@ public sealed class AppSettings
             }
 
             var json = File.ReadAllText(SettingsFilePath);
-            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? CreateDefault();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
+            if (settings is null)
+            {
+                BackupCorruptSettings("deserialized-null");
+                var fallback = CreateDefault();
+                fallback.Clamp();
+                return fallback;
+            }
+
             settings.Clamp();
             return settings;
         }
-        catch
+        catch (Exception ex)
         {
+            BackupCorruptSettings(ex.GetType().Name);
             var fallback = CreateDefault();
             fallback.Clamp();
             return fallback;
+        }
+    }
+
+    /// <summary>
+    /// Rename a corrupt/unreadable settings.json to settings.json.bad-YYYYMMDD-HHmmss
+    /// so the user does not lose their config and the next Save can write a clean file.
+    /// </summary>
+    private static void BackupCorruptSettings(string reason)
+    {
+        try
+        {
+            if (!File.Exists(SettingsFilePath))
+            {
+                return;
+            }
+
+            var backup = SettingsFilePath + $".bad-{DateTime.Now:yyyyMMdd-HHmmss}";
+            File.Move(SettingsFilePath, backup, overwrite: true);
+        }
+        catch
+        {
+            // Best effort — do not crash during settings load.
         }
     }
 
@@ -75,7 +105,19 @@ public sealed class AppSettings
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(RuntimeDirectory);
         var json = JsonSerializer.Serialize(this, JsonOptions);
-        File.WriteAllText(SettingsFilePath, json);
+
+        // Atomic write: write to a temp file, then rename. Prevents a truncated
+        // settings.json if the process crashes (or power fails) mid-write.
+        var tempPath = SettingsFilePath + ".tmp";
+        File.WriteAllText(tempPath, json);
+        if (File.Exists(SettingsFilePath))
+        {
+            File.Replace(tempPath, SettingsFilePath, destinationBackupFileName: null);
+        }
+        else
+        {
+            File.Move(tempPath, SettingsFilePath);
+        }
     }
 
     public void Clamp()
@@ -127,11 +169,6 @@ public sealed class AppSettings
 
     private static string ResolveDefaultToolchainRoot()
     {
-        if (Directory.Exists(DefaultToolchainCandidate))
-        {
-            return DefaultToolchainCandidate;
-        }
-
         foreach (var candidate in Util.Paths.GetToolchainCandidates())
         {
             if (Directory.Exists(candidate))

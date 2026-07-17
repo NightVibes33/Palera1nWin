@@ -133,6 +133,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         Jailbreak.IsRunningChanged -= OnJailbreakRunningChanged;
         _driverWatchdog.Dispose();
+        Versions.Dispose();
         _logService.Dispose();
         _monitor.DeviceChanged -= OnDeviceChanged;
         _monitor.Dispose();

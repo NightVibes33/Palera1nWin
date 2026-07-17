@@ -18,9 +18,12 @@ public sealed class WslService
             new[] { "--list", "--quiet" },
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        // wsl.exe --list emits UTF-16LE on Windows; ProcessRunner decodes as UTF-8,
+        // so every ASCII char is followed by a NUL byte. Strip ALL NULs, not just ends.
         var distros = result.StandardOutput
+            .Replace("\0", "", StringComparison.Ordinal)
             .Split('\n', '\r')
-            .Select(line => line.Trim().Trim('\0'))
+            .Select(line => line.Trim())
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .ToList();
 

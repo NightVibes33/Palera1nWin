@@ -661,8 +661,9 @@ public sealed class JailbreakOrchestrator : IDisposable
 
     public void Dispose()
     {
-        _monitor.Dispose();
         _openRa1nService.LogReceived -= ForwardLog;
         _palera1nHostService.LogReceived -= ForwardLog;
+        _openRa1nService.Dispose();
+        _monitor.Dispose();
     }
 }

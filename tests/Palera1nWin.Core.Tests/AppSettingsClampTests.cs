@@ -12,7 +12,7 @@ public sealed class AppSettingsClampTests
             JailbreakMode = "ROOTFUL",
             WslDistro = "  Ubuntu  ",
             SelectedReleaseTag = "  v2.3  ",
-            ToolchainRoot = @"E:\Work\Palera1n-Windows\",
+            ToolchainRoot = @"C:\Palera1n-Windows\",
         };
 
         settings.Clamp();
@@ -20,7 +20,7 @@ public sealed class AppSettingsClampTests
         Assert.Equal("rootful", settings.JailbreakMode);
         Assert.Equal("Ubuntu", settings.WslDistro);
         Assert.Equal("v2.3", settings.SelectedReleaseTag);
-        Assert.Equal(@"E:\Work\Palera1n-Windows", settings.ToolchainRoot);
+        Assert.Equal(@"C:\Palera1n-Windows", settings.ToolchainRoot);
     }
 
     [Fact]

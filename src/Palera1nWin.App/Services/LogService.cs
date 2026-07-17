@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows.Data;
+using System.Windows.Threading;
 using Palera1nWin.Core.Models;
 using Palera1nWin.Core.Settings;
 
@@ -12,6 +14,7 @@ public sealed class LogService : IDisposable
 
     private readonly StreamWriter? _fileWriter;
     private readonly string? _logFilePath;
+    private readonly Dispatcher _dispatcher;
     private bool _disposed;
 
     public ObservableCollection<string> Lines { get; } = [];
@@ -22,6 +25,11 @@ public sealed class LogService : IDisposable
 
     public LogService()
     {
+        _dispatcher = Dispatcher.CurrentDispatcher;
+
+        // Allow WPF to read the collection from any thread by acquiring _sync.
+        BindingOperations.EnableCollectionSynchronization(Lines, _sync);
+
         try
         {
             Directory.CreateDirectory(AppSettings.LogsDirectory);
@@ -38,14 +46,10 @@ public sealed class LogService : IDisposable
     public void Append(LogLine line)
     {
         var formatted = line.ToString();
+
+        // File write can happen on any thread.
         lock (_sync)
         {
-            Lines.Add(formatted);
-            while (Lines.Count > MaxLines)
-            {
-                Lines.RemoveAt(0);
-            }
-
             try
             {
                 _fileWriter?.WriteLine(formatted);
@@ -56,7 +60,30 @@ public sealed class LogService : IDisposable
             }
         }
 
+        // Collection mutation must be marshalled to the UI thread to avoid
+        // NotSupportedException ("cross-thread CollectionChanged").
+        if (_dispatcher.CheckAccess())
+        {
+            AddLine(formatted);
+        }
+        else
+        {
+            _dispatcher.BeginInvoke(new Action<string>(AddLine), formatted);
+        }
+
         LineAdded?.Invoke(this, line);
+    }
+
+    private void AddLine(string formatted)
+    {
+        lock (_sync)
+        {
+            Lines.Add(formatted);
+            while (Lines.Count > MaxLines)
+            {
+                Lines.RemoveAt(0);
+            }
+        }
     }
 
     public void Append(string source, string message, bool isError = false)
@@ -70,6 +97,18 @@ public sealed class LogService : IDisposable
     }
 
     public void Clear()
+    {
+        if (_dispatcher.CheckAccess())
+        {
+            ClearCore();
+        }
+        else
+        {
+            _dispatcher.BeginInvoke(new Action(ClearCore));
+        }
+    }
+
+    private void ClearCore()
     {
         lock (_sync)
         {

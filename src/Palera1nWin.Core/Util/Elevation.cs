@@ -41,7 +41,7 @@ public static class Elevation
 
     /// <summary>
     /// Run a one-shot elevated command (UAC). Output is not captured; check side effects after.
-    /// Returns false if the user cancels UAC or the process cannot start.
+    /// Returns false if the user cancels UAC, the process cannot start, times out, or exits non-zero.
     /// </summary>
     public static bool RunElevatedWait(
         string fileName,
@@ -50,12 +50,27 @@ public static class Elevation
     {
         var quotedArgs = string.Join(
             " ",
-            arguments.Select(a => a.Contains(' ', StringComparison.Ordinal) ? $"\"{a}\"" : a));
+            arguments.Select(QuoteArgument));
 
+        return RunElevatedRaw(fileName, quotedArgs, timeout);
+    }
+
+    /// <summary>
+    /// Run a one-shot elevated command with a raw argument string (no re-quoting).
+    /// Use this when the caller has already formatted the arguments (e.g. parsed from a registry UninstallString).
+    /// </summary>
+    public static bool RunElevatedWaitRaw(
+        string fileName,
+        string rawArguments,
+        TimeSpan? timeout = null)
+        => RunElevatedRaw(fileName, rawArguments, timeout);
+
+    private static bool RunElevatedRaw(string fileName, string arguments, TimeSpan? timeout)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
-            Arguments = quotedArgs,
+            Arguments = arguments,
             UseShellExecute = true,
             Verb = "runas",
             WindowStyle = ProcessWindowStyle.Hidden,
@@ -91,5 +106,25 @@ public static class Elevation
             // UAC cancelled or start failed.
             return false;
         }
+    }
+
+    /// <summary>
+    /// Quote a single argument for the Windows command line.
+    /// Wraps in double-quotes if it contains spaces, and escapes any embedded quotes.
+    /// </summary>
+    private static string QuoteArgument(string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            return "\"\"";
+        }
+
+        if (!arg.Contains(' ', StringComparison.Ordinal) &&
+            !arg.Contains('"', StringComparison.Ordinal))
+        {
+            return arg;
+        }
+
+        return "\"" + arg.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
 }

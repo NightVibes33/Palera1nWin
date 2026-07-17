@@ -21,6 +21,7 @@ public sealed class LibusbKWatchdog : IDisposable
     private readonly TimeSpan _reinstallCooldown;
     private readonly Dictionary<ushort, string?> _lastLoggedService = new();
     private readonly Dictionary<ushort, DateTimeOffset> _lastAttempt = new();
+    private readonly object _startStopLock = new();
     private bool _loggedAutoOff;
     private bool _loggedNotAdmin;
     private CancellationTokenSource? _cts;
@@ -56,41 +57,49 @@ public sealed class LibusbKWatchdog : IDisposable
             throw new ObjectDisposedException(nameof(LibusbKWatchdog));
         }
 
-        Stop();
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
-        Emit("driver-watch", "libusbK watchdog started (will re-apply whenever DFU/Pongo leaves libusbK).");
-        _loop = Task.Run(() => RunLoopAsync(token), token);
+        lock (_startStopLock)
+        {
+            Stop();
+            _cts = new CancellationTokenSource();
+            var token = _cts.Token;
+            Emit("driver-watch", "libusbK watchdog started (will re-apply whenever DFU/Pongo leaves libusbK).");
+            _loop = Task.Run(() => RunLoopAsync(token), token);
+        }
     }
 
     public void Stop()
     {
-        if (_cts is null)
+        lock (_startStopLock)
         {
-            return;
+            if (_cts is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _cts.Cancel();
+            }
+            catch
+            {
+                // Ignore.
+            }
+
+            try
+            {
+                // All loop awaits use ConfigureAwait(false), so this won't deadlock on the UI thread.
+                _loop?.Wait(TimeSpan.FromSeconds(3));
+            }
+            catch
+            {
+                // Ignore cancel/fault.
+            }
+
+            _cts.Dispose();
+            _cts = null;
+            _loop = null;
         }
 
-        try
-        {
-            _cts.Cancel();
-        }
-        catch
-        {
-            // Ignore.
-        }
-
-        try
-        {
-            _loop?.Wait(TimeSpan.FromSeconds(3));
-        }
-        catch
-        {
-            // Ignore cancel/fault.
-        }
-
-        _cts.Dispose();
-        _cts = null;
-        _loop = null;
         Emit("driver-watch", $"libusbK watchdog stopped (re-applies this session: {ReinstallCount}).");
     }
 

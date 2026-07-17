@@ -557,7 +557,7 @@ public sealed class UsbipdService
 
         try
         {
-            var result = ProcessRunner.RunAsync(ExecutablePath, args).GetAwaiter().GetResult();
+            var result = ProcessRunner.Run(ExecutablePath, args);
             return result.CombinedOutput;
         }
         catch

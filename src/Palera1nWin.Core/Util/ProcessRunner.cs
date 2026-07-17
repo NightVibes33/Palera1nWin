@@ -288,4 +288,74 @@ public static class ProcessRunner
             onStdoutLine: onStdoutLine,
             onStderrLine: onStderrLine);
     }
+
+    /// <summary>
+    /// Synchronous process runner for callers that cannot use async (e.g. property getters,
+    /// timer callbacks). Avoids the sync-over-async .GetAwaiter().GetResult() anti-pattern.
+    /// </summary>
+    public static ProcessResult Run(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory = null,
+        TimeSpan? timeout = null)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            startInfo.WorkingDirectory = workingDirectory;
+        }
+
+        foreach (var arg in arguments)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return new ProcessResult { ExitCode = -1 };
+            }
+
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+
+            var waitMs = (int)(timeout ?? TimeSpan.FromMinutes(2)).TotalMilliseconds;
+            if (!process.WaitForExit(waitMs))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Ignore.
+                }
+
+                return new ProcessResult { ExitCode = -1 };
+            }
+
+            return new ProcessResult
+            {
+                ExitCode = process.ExitCode,
+                StandardOutput = stdout.TrimEnd(),
+                StandardError = stderr.TrimEnd(),
+            };
+        }
+        catch
+        {
+            return new ProcessResult { ExitCode = -1 };
+        }
+    }
 }
