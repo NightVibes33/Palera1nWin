@@ -34,9 +34,18 @@ if (-not (Test-Path $ToolchainSource)) {
 Write-Host "[bundle] publishing Palera1nWin ($Configuration, win-x64, single-file)..." -ForegroundColor Cyan
 $publishDir = Join-Path $repoRoot $PublishOutput
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
+# IncludeNativeLibrariesForSelfExtract + EnableCompressionInSingleFile embed the
+# WPF native DLLs (D3DCompiler, wpfgfx, PenImc, vcruntime140_cor3, ...) into ONE
+# compressed exe (~77 MB) so the release folder is just Palera1nWin.exe + toolchain\.
 dotnet publish src\Palera1nWin.App -c $Configuration -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -o $publishDir
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:EnableCompressionInSingleFile=true `
+    -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)." }
+
+# Drop PDBs — end users do not need symbol files.
+Get-ChildItem $publishDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue | Remove-Item -Force
 
 # ---- 2. stage the runtime toolchain ---------------------------------------
 Write-Host "[bundle] staging toolchain into $PublishOutput\toolchain\..." -ForegroundColor Cyan
@@ -61,6 +70,9 @@ $files = @(
     @("dist\native\wdi-simple.exe",           "dist\native\wdi-simple.exe"),
     @("dist\native\zadig.exe",                 "dist\native\zadig.exe"),
     @("dist\native\gaster.exe",                "dist\native\gaster.exe"),
+    # gaster.exe (CLI --native-pwn path) links libcrypto + its own libusb build.
+    @("dist\native\libcrypto-1_1-x64.dll",     "dist\native\libcrypto-1_1-x64.dll"),
+    @("dist\native\libusb-1.0.dll",            "dist\native\libusb-1.0.dll"),
     @("dist\palera1n-linux-x86_64",            "dist\palera1n-linux-x86_64"),
     @("palera1n.cmd",                          "palera1n.cmd"),
     @("windows\palera1n.ps1",                  "windows\palera1n.ps1"),

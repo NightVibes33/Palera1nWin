@@ -47,8 +47,8 @@ public sealed class WslService
         }
 
         await RunRootCommandAsync(
-            distro,
             "modprobe vhci-hcd 2>/dev/null || true",
+            distro,
             cancellationToken).ConfigureAwait(false);
     }
 

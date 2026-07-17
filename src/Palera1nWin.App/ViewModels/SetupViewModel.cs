@@ -405,7 +405,25 @@ public sealed class SetupViewModel : ObservableObject
                 return;
             }
 
-            DoctorSummary = "Provisioning WSL (installing runtime + palera1n binary)... this can take a few minutes on first run.";
+            // Resolve the actually-installed distro (prefers settings.WslDistro, else the
+            // first available, e.g. "Ubuntu-24.04"). Passing the literal setting would break
+            // provisioning for users whose distro is not named exactly "Ubuntu".
+            var distro = await _wslService.ResolveDistroAsync().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(distro))
+            {
+                var msg = "No WSL distro detected. Install one first: wsl --install -d Ubuntu (admin), reboot, then retry.";
+                DoctorSummary = msg;
+                _logService.Append("setup", msg, isError: true);
+                _setStatus("Provision WSL: no distro.");
+                System.Windows.MessageBox.Show(
+                    msg,
+                    "Provision WSL",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Warning);
+                return;
+            }
+
+            DoctorSummary = $"Provisioning WSL '{distro}' (installing runtime + palera1n binary)... this can take a few minutes on first run.";
             Action<string> progress = line =>
             {
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
@@ -416,11 +434,11 @@ public sealed class SetupViewModel : ObservableObject
             };
 
             var result = await _wslProvisionService
-                .ProvisionAsync(resolved, _settings.WslDistro, progress)
+                .ProvisionAsync(resolved, distro, progress)
                 .ConfigureAwait(true);
 
             var provisioned = result.Succeeded
-                && await _wslProvisionService.IsProvisionedAsync(_settings.WslDistro).ConfigureAwait(true);
+                && await _wslProvisionService.IsProvisionedAsync(distro).ConfigureAwait(true);
 
             DoctorSummary = provisioned
                 ? "WSL provisioned. palera1n runtime installed in /opt/palera1n/."
