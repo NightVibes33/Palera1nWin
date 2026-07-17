@@ -1,0 +1,56 @@
+<UserControl x:Class="Palera1nWin.App.Views.VersionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" DataContext="{Binding Versions}">
+    <StackPanel Margin="28,20,28,28" MaxWidth="920" HorizontalAlignment="Left">
+      <Grid>
+        <StackPanel>
+          <TextBlock Text="Versions" Style="{StaticResource Text.Title}"/>
+          <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
+                     Text="Fetch palera1n releases from GitHub and download the Linux binary for WSL."/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+          <ui:Button Content="Refresh" Command="{Binding RefreshCommand}" Margin="0,0,8,0"/>
+          <ui:Button Content="Download selected" Appearance="Primary" Command="{Binding DownloadCommand}"/>
+        </StackPanel>
+      </Grid>
+
+      <ui:InfoBar Margin="0,18,0,0" Severity="Informational" IsOpen="True" IsClosable="False"
+                  Title="Bundled toolchain"
+                  Message="{Binding BundledVersionNote}"/>
+
+      <TextBlock Text="{Binding DownloadStatus}" Style="{StaticResource Text.Caption}" Margin="0,14,0,10"/>
+
+      <ui:Card VerticalAlignment="Stretch">
+        <ListBox ItemsSource="{Binding Releases}"
+                 SelectedItem="{Binding SelectedRelease, Mode=TwoWay}"
+                 ItemContainerStyle="{StaticResource BareListBoxItem}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 MinHeight="320">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Padding="10,8" CornerRadius="6" Margin="0,0,0,4"
+                      Background="{DynamicResource ControlFillColorDefaultBrush}">
+                <Grid>
+                  <StackPanel>
+                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+                    <TextBlock Style="{StaticResource Text.Caption}" Margin="0,2,0,0">
+                      <Run Text="{Binding TagName, Mode=OneWay}"/>
+                      <Run Text="  ·  "/>
+                      <Run Text="{Binding PublishedText, Mode=OneWay}"/>
+                      <Run Text="  ·  "/>
+                      <Run Text="{Binding AssetName, Mode=OneWay}"/>
+                      <Run Text="  ·  "/>
+                      <Run Text="{Binding SizeText, Mode=OneWay}"/>
+                    </TextBlock>
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </ui:Card>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

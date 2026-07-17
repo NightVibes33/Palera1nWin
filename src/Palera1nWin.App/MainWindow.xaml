@@ -1,0 +1,118 @@
+﻿<ui:FluentWindow x:Class="Palera1nWin.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:views="clr-namespace:Palera1nWin.App.Views"
+        Title="Palera1nWin"
+        Width="1280" Height="820" MinWidth="1080" MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        WindowBackdropType="None"
+        WindowCornerPreference="Round"
+        ExtendsContentIntoTitleBar="True"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        FontFamily="Segoe UI Variable Text, Segoe UI">
+
+  <Grid>
+    <Border x:Name="SmokeTint" Background="#A60E1014" Visibility="Collapsed"/>
+
+    <Grid x:Name="Shell">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <ui:TitleBar Grid.Row="0">
+        <ui:TitleBar.Header>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+            <TextBlock Text="&#xE7F8;" FontFamily="{StaticResource Font.Icons}" FontSize="18"
+                       Foreground="{StaticResource Brush.Accent}" VerticalAlignment="Center"/>
+            <TextBlock Text="Palera1nWin" FontSize="12" VerticalAlignment="Center" Margin="10,0,0,0"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+          </StackPanel>
+        </ui:TitleBar.Header>
+      </ui:TitleBar>
+
+      <StackPanel Grid.Row="1">
+        <Grid Margin="12,0,12,6"
+              Visibility="{Binding IsElevated, Converter={StaticResource BoolToVisInverted}}">
+          <ui:InfoBar Severity="Warning"
+                      IsClosable="False"
+                      IsOpen="True"
+                      Title="Running without administrator rights"
+                      Message="Driver installation and some toolchain steps may require elevation."/>
+          <ui:Button Content="Restart as administrator" Command="{Binding RestartAsAdminCommand}"
+                     HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"/>
+        </Grid>
+      </StackPanel>
+
+      <ui:NavigationView x:Name="RootNavigation" Grid.Row="2"
+                         PaneDisplayMode="Left"
+                         OpenPaneLength="216"
+                         IsBackButtonVisible="Collapsed"
+                         IsPaneToggleVisible="False"
+                         Transition="FadeInWithSlide">
+        <ui:NavigationView.MenuItems>
+          <ui:NavigationViewItem Content="Jailbreak" TargetPageType="{x:Type views:JailbreakView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Home24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="Device" TargetPageType="{x:Type views:DeviceView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Phone24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="Versions" TargetPageType="{x:Type views:VersionsView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Tag24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="Setup" TargetPageType="{x:Type views:SetupView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Wrench24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="Logs" TargetPageType="{x:Type views:LogsView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Document24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+        </ui:NavigationView.MenuItems>
+        <ui:NavigationView.FooterMenuItems>
+          <ui:NavigationViewItem Content="Settings" TargetPageType="{x:Type views:SettingsView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Settings24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="About" TargetPageType="{x:Type views:AboutView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="Info24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+        </ui:NavigationView.FooterMenuItems>
+      </ui:NavigationView>
+
+      <Border Grid.Row="3" Background="{DynamicResource ControlFillColorDefaultBrush}"
+              BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+              BorderThickness="0,1,0,0" Padding="16,6">
+        <Grid>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Border Style="{StaticResource Badge}" Background="#26343F52" Margin="0,0,10,0"
+                    Visibility="{Binding IsElevated, Converter={StaticResource BoolToVis}}">
+              <TextBlock Text="Administrator" FontSize="10.5" Foreground="{StaticResource Brush.Success}"/>
+            </Border>
+            <TextBlock Text="{Binding StatusText}" FontSize="12"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+          <TextBlock HorizontalAlignment="Right" FontSize="12"
+                     Foreground="{DynamicResource TextFillColorTertiaryBrush}" VerticalAlignment="Center"
+                     Text="{Binding VersionText, Mode=OneWay}"/>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</ui:FluentWindow>

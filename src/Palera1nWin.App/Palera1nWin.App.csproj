@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Palera1nWin.App</RootNamespace>
+    <AssemblyName>Palera1nWin</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Description>Palera1nWin — production Windows GUI for palera1n (hybrid openra1n + WSL).</Description>
+    <ApplicationIcon Condition="Exists('..\..\assets\icon.ico')">..\..\assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Palera1nWin.Core\Palera1nWin.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('..\..\assets\icon.png')">
+    <Resource Include="..\..\assets\icon.png" Link="Assets\icon.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+  <Target Name="CopyBundledNativeFiles" AfterTargets="AfterBuild">
+    <ItemGroup>
+      <BundledNativeFiles Include="$(MSBuildThisFileDirectory)..\..\native\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledNativeFiles)" DestinationFolder="$(OutDir)native\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildThisFileDirectory)..\..\native')" />
+  </Target>
+</Project>
