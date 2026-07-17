@@ -20,10 +20,12 @@
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
-  <Target Name="CopyBundledNativeFiles" AfterTargets="AfterBuild">
-    <ItemGroup>
-      <BundledNativeFiles Include="$(MSBuildThisFileDirectory)..\..\native\**\*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(BundledNativeFiles)" DestinationFolder="$(OutDir)native\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildThisFileDirectory)..\..\native')" />
-  </Target>
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\native')">
+    <Content Include="$(MSBuildThisFileDirectory)..\..\native\**\*">
+      <Link>native\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>native\</PackagePath>
+    </Content>
+  </ItemGroup>
 </Project>
