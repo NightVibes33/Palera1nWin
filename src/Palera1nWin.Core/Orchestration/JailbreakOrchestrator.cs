@@ -11,7 +11,6 @@ namespace Palera1nWin.Core.Orchestration;
 public enum JailbreakStage
 {
     Validating,
-    PasscodeAcknowledgement,
     StoppingAmds,
     DetachingUsbipd,
     EnsuringDfuDriver,
@@ -69,13 +68,6 @@ public sealed class JailbreakOrchestrator : IDisposable
             {
                 Fail($"Missing toolchain files: {string.Join(", ", missing)}");
                 return JailbreakStage.Failed;
-            }
-
-            if (!_settings.PasscodeAcknowledged)
-            {
-                Report(JailbreakStage.PasscodeAcknowledgement, "Passcode removal acknowledgement is required.", 5);
-                Fail("User must acknowledge passcode removal before jailbreak.");
-                return JailbreakStage.PasscodeAcknowledgement;
             }
 
             Report(JailbreakStage.StoppingAmds, "Stopping Apple Mobile Device Service...", 10);

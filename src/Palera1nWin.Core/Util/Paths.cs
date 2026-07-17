@@ -9,18 +9,14 @@ public static class Paths
         // 1. A "toolchain" subfolder next to the app (users can drop the toolchain there).
         yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "toolchain"));
 
-        // 2. Sibling directory (dev layout: repo cloned next to Palera1n-Windows).
-        var sibling = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Palera1n-Windows"));
-        yield return sibling;
-
-        // 3. Environment variable override.
+        // 2. Environment variable override.
         var env = Environment.GetEnvironmentVariable("PALERA1N_TOOLCHAIN");
         if (!string.IsNullOrWhiteSpace(env))
         {
             yield return env.Trim();
         }
 
-        // 4. Program Files (system-wide install).
+        // 3. Program Files (system-wide install).
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         yield return Path.Combine(programFiles, "Palera1n-Windows");
 

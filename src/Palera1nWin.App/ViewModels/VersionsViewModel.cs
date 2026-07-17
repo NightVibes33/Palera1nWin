@@ -55,6 +55,10 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
             {
                 _settings.SelectedReleaseTag = value.TagName;
                 DownloadCommand.RaiseCanExecuteChanged();
+                if (Releases.Count > 0)
+                {
+                    DownloadStatus = $"Loaded {Releases.Count} releases. Selected: {value.TagName}.";
+                }
             }
         }
     }
@@ -113,7 +117,7 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
             SelectedRelease = preferred;
             DownloadStatus = Releases.Count == 0
                 ? "No releases returned from GitHub."
-                : $"Loaded {Releases.Count} releases.";
+                : $"Loaded {Releases.Count} releases. Selected: {SelectedRelease?.TagName}.";
             _setStatus($"Loaded {Releases.Count} palera1n releases.");
             _logService.Append("versions", DownloadStatus);
         }

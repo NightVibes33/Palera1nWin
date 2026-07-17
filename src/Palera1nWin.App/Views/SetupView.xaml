@@ -11,13 +11,17 @@
       <TextBlock Text="TOOLCHAIN" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card VerticalAlignment="Stretch">
         <Grid>
-          <StackPanel MaxWidth="520" HorizontalAlignment="Left">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0" MaxWidth="520" HorizontalAlignment="Left">
             <TextBlock Text="Toolchain root" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
             <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
                        Text="Path to Palera1n-Windows (openra1n, palera1n.cmd, scripts)."/>
             <TextBox Text="{Binding ToolchainRoot, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0"/>
           </StackPanel>
-          <ui:Button Content="Browse" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+          <ui:Button Grid.Column="1" Content="Browse" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                      Command="{Binding BrowseToolchainCommand}"/>
         </Grid>
       </ui:Card>
@@ -26,11 +30,16 @@
       <ui:Card VerticalAlignment="Stretch">
         <StackPanel>
           <Grid>
-            <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" MaxWidth="520" HorizontalAlignment="Left">
               <TextBlock Text="Doctor checks" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-              <TextBlock Text="{Binding DoctorSummary}" Style="{StaticResource Text.Caption}" Margin="0,3,0,0"/>
+              <TextBlock Text="{Binding DoctorSummary}" Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
+                         TextWrapping="Wrap"/>
             </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
               <ui:Button Content="Run checks" Command="{Binding RunDoctorCommand}" Margin="0,0,8,0"/>
               <ui:Button Content="Install drivers" Appearance="Primary" Command="{Binding InstallDriversCommand}"/>
             </StackPanel>
@@ -41,12 +50,16 @@
                   Background="#26D83A3A"
                   Visibility="{Binding UsbDkDetected, Converter={StaticResource BoolToVis}}">
             <Grid>
-              <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" MaxWidth="520" HorizontalAlignment="Left">
                 <TextBlock Text="UsbDk filter detected" Style="{StaticResource Text.Body}" FontWeight="SemiBold" Foreground="#FFD83A3A"/>
                 <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0" TextWrapping="Wrap"
                            Text="UsbDk conflicts with usbipd-win and causes attach failures. Uninstall it for a reliable jailbreak."/>
               </StackPanel>
-              <ui:Button Content="Uninstall UsbDk" Appearance="Danger"
+              <ui:Button Grid.Column="1" Content="Uninstall UsbDk" Appearance="Danger"
                          HorizontalAlignment="Right" VerticalAlignment="Center"
                          Command="{Binding UninstallUsbDkCommand}"/>
             </Grid>
@@ -58,12 +71,16 @@
                 <Border Padding="10,8" CornerRadius="6" Margin="0,0,0,6"
                         Background="{DynamicResource ControlFillColorDefaultBrush}">
                   <Grid>
-                    <StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
                       <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
                       <TextBlock Text="{Binding Detail}" Style="{StaticResource Text.Caption}" Margin="0,2,0,0"
                                  TextWrapping="Wrap"/>
                     </StackPanel>
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Badge}"
+                    <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource Badge}"
                             Background="#26343F52">
                       <TextBlock Text="{Binding StatusText}" FontSize="10.5"
                                  Foreground="{StaticResource Brush.Accent}"/>

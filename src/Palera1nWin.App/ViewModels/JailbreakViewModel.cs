@@ -21,7 +21,6 @@ public sealed class JailbreakViewModel : ObservableObject
     private string _deviceModeLabel = "No device";
     private string _deviceModeBadgeBackground = "#26343F52";
     private string _deviceModeBadgeForeground = "#9AA3B8";
-    private bool _passcodeAcknowledged;
     private string _selectedJailbreakMode = "rootless";
     private string _logPreview = string.Empty;
 
@@ -37,13 +36,12 @@ public sealed class JailbreakViewModel : ObservableObject
         _setStatus = setStatus;
 
         _selectedJailbreakMode = settings.JailbreakMode;
-        _passcodeAcknowledged = settings.PasscodeAcknowledged;
 
         SafeMode = settings.SafeMode;
         VerboseBoot = settings.VerboseBoot;
         AutoInstallDrivers = settings.AutoInstallDrivers;
 
-        StartJailbreakCommand = new AsyncRelayCommand(StartJailbreakAsync, () => !IsRunning && PasscodeAcknowledged);
+        StartJailbreakCommand = new AsyncRelayCommand(StartJailbreakAsync, () => !IsRunning);
         CancelJailbreakCommand = new RelayCommand(CancelJailbreak, () => IsRunning);
 
         _monitor.DeviceChanged += OnDeviceChanged;
@@ -109,21 +107,6 @@ public sealed class JailbreakViewModel : ObservableObject
         }
     }
 
-    public bool PasscodeAcknowledged
-    {
-        get => _passcodeAcknowledged;
-        set
-        {
-            if (SetProperty(ref _passcodeAcknowledged, value))
-            {
-                _settings.PasscodeAcknowledged = value;
-                _settings.Save();
-                OnPropertyChanged(nameof(CanStartJailbreak));
-                StartJailbreakCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
     public bool IsRunning
     {
         get => _isRunning;
@@ -144,7 +127,7 @@ public sealed class JailbreakViewModel : ObservableObject
     /// </summary>
     public event EventHandler<bool>? IsRunningChanged;
 
-    public bool CanStartJailbreak => !IsRunning && PasscodeAcknowledged;
+    public bool CanStartJailbreak => !IsRunning;
 
     public double Progress
     {
@@ -221,11 +204,6 @@ public sealed class JailbreakViewModel : ObservableObject
                 case JailbreakStage.Cancelled:
                     ProgressText = "Jailbreak cancelled.";
                     _setStatus("Jailbreak cancelled.");
-                    break;
-                case JailbreakStage.PasscodeAcknowledgement:
-                    ProgressText = "Passcode acknowledgement is required.";
-                    _setStatus("Acknowledge passcode removal to continue.");
-                    PasscodeAcknowledged = false;
                     break;
                 default:
                     ProgressText = "Jailbreak failed. See Logs for details.";

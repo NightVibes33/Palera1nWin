@@ -30,12 +30,14 @@ public sealed class AppSettings
 
     public bool CheckUpdates { get; set; } = true;
 
-    public bool PasscodeAcknowledged { get; set; }
-
     public bool PreferUsbA { get; set; } = true;
 
+    /// <summary>
+    /// Portable root: settings, logs, and downloaded runtime binaries live next
+    /// to the running executable so the app is fully self-contained on a USB stick.
+    /// </summary>
     public static string RootDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Palera1nWin");
+        AppContext.BaseDirectory;
 
     public static string SettingsFilePath => Path.Combine(RootDirectory, "settings.json");
 

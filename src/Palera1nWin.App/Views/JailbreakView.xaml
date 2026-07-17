@@ -32,16 +32,36 @@
         </StackPanel>
       </Border>
 
+      <TextBlock Text="PROGRESS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card VerticalAlignment="Stretch">
+        <StackPanel>
+          <TextBlock Text="{Binding ProgressText, Mode=OneWay}" Style="{StaticResource Text.Body}"/>
+          <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Height="8" Margin="0,12,0,0"/>
+        </StackPanel>
+      </ui:Card>
+
+      <TextBlock Text="LOG PREVIEW" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card VerticalAlignment="Stretch">
+        <TextBox Text="{Binding LogPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                 AcceptsReturn="True" MinHeight="140" MaxHeight="220"
+                 VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent"
+                 FontFamily="Consolas, Cascadia Mono, Segoe UI" FontSize="11.5"/>
+      </ui:Card>
+
       <TextBlock Text="OPTIONS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card VerticalAlignment="Stretch">
         <StackPanel>
           <Grid>
-            <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
               <TextBlock Text="Jailbreak mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
               <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
                          Text="Rootless is recommended for most devices. Rootful installs to the system volume."/>
             </StackPanel>
-            <ComboBox HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="160"
+            <ComboBox Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="160"
                       ItemsSource="{Binding JailbreakModes}"
                       SelectedItem="{Binding SelectedJailbreakMode, Mode=TwoWay}"/>
           </Grid>
@@ -49,34 +69,46 @@
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
               <TextBlock Text="Safe mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
               <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
                          Text="Boot into safe mode after jailbreak (no tweak injection)."/>
             </StackPanel>
-            <ui:ToggleSwitch HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding SafeMode}"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding SafeMode}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
               <TextBlock Text="Verbose boot" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
               <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
                          Text="Show verbose boot output from palera1n."/>
             </StackPanel>
-            <ui:ToggleSwitch HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding VerboseBoot}"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding VerboseBoot}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
               <TextBlock Text="Auto-install drivers" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
               <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
                          Text="Attempt libusbK installation automatically during jailbreak."/>
             </StackPanel>
-            <ui:ToggleSwitch HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding AutoInstallDrivers}"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding AutoInstallDrivers}"/>
           </Grid>
         </StackPanel>
       </ui:Card>
@@ -95,30 +127,7 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-
-          <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,8"/>
-
-          <CheckBox Content="I have removed my device passcode (required for A11+ jailbreak)"
-                    IsChecked="{Binding PasscodeAcknowledged, Mode=TwoWay}"/>
-          <TextBlock Text="Start Jailbreak stays disabled until this box is checked."
-                     Style="{StaticResource Text.Caption}" Margin="0,6,0,0"/>
         </StackPanel>
-      </ui:Card>
-
-      <TextBlock Text="PROGRESS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
-      <ui:Card VerticalAlignment="Stretch">
-        <StackPanel>
-          <TextBlock Text="{Binding ProgressText, Mode=OneWay}" Style="{StaticResource Text.Body}"/>
-          <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Height="8" Margin="0,12,0,0"/>
-        </StackPanel>
-      </ui:Card>
-
-      <TextBlock Text="LOG PREVIEW" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
-      <ui:Card VerticalAlignment="Stretch">
-        <TextBox Text="{Binding LogPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                 AcceptsReturn="True" MinHeight="140" MaxHeight="220"
-                 VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent"
-                 FontFamily="Consolas, Cascadia Mono, Segoe UI" FontSize="11.5"/>
       </ui:Card>
     </StackPanel>
   </ScrollViewer>

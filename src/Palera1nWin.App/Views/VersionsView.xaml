@@ -20,7 +20,10 @@
                   Title="Bundled toolchain"
                   Message="{Binding BundledVersionNote}"/>
 
-      <TextBlock Text="{Binding DownloadStatus}" Style="{StaticResource Text.Caption}" Margin="0,14,0,10"/>
+      <TextBlock Style="{StaticResource Text.Caption}" Margin="0,14,0,4"
+                 Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                 Text="Click a release below to select it, then choose Download selected."/>
+      <TextBlock Text="{Binding DownloadStatus}" Style="{StaticResource Text.Caption}" Margin="0,0,0,10"/>
 
       <ui:Card VerticalAlignment="Stretch">
         <ListBox ItemsSource="{Binding Releases}"
@@ -30,10 +33,16 @@
                  MinHeight="320">
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <Border Padding="10,8" CornerRadius="6" Margin="0,0,0,4"
-                      Background="{DynamicResource ControlFillColorDefaultBrush}">
+              <Border x:Name="CardBorder"
+                      Padding="10,8" CornerRadius="6" Margin="0,0,0,4"
+                      Background="{DynamicResource ControlFillColorDefaultBrush}"
+                      BorderBrush="Transparent" BorderThickness="2">
                 <Grid>
-                  <StackPanel>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
                     <TextBlock Text="{Binding DisplayName}" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
                     <TextBlock Style="{StaticResource Text.Caption}" Margin="0,2,0,0">
                       <Run Text="{Binding TagName, Mode=OneWay}"/>
@@ -45,8 +54,21 @@
                       <Run Text="{Binding SizeText, Mode=OneWay}"/>
                     </TextBlock>
                   </StackPanel>
+                  <TextBlock Grid.Column="1" Text="&#xE73E;" FontFamily="{StaticResource Font.Icons}"
+                             FontSize="18" VerticalAlignment="Center" Margin="12,0,0,0"
+                             Foreground="{StaticResource Brush.Accent}"
+                             Visibility="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected, Converter={StaticResource BoolToVis}}"/>
                 </Grid>
               </Border>
+              <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsMouseOver}" Value="True">
+                  <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected}" Value="True">
+                  <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}"/>
+                  <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource Brush.AccentSoft}"/>
+                </DataTrigger>
+              </DataTemplate.Triggers>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>

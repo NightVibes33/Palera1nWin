@@ -16,7 +16,6 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _debugLogging = true;
     private bool _autoInstallDrivers = true;
     private bool _checkUpdates = true;
-    private bool _passcodeAcknowledged;
     private bool _preferUsbA = true;
 
     public SettingsViewModel(AppSettings settings, Action<string> setStatus)
@@ -84,12 +83,6 @@ public sealed class SettingsViewModel : ObservableObject
         set => SetProperty(ref _checkUpdates, value);
     }
 
-    public bool PasscodeAcknowledged
-    {
-        get => _passcodeAcknowledged;
-        set => SetProperty(ref _passcodeAcknowledged, value);
-    }
-
     public bool PreferUsbA
     {
         get => _preferUsbA;
@@ -112,7 +105,6 @@ public sealed class SettingsViewModel : ObservableObject
         DebugLogging = _settings.DebugLogging;
         AutoInstallDrivers = _settings.AutoInstallDrivers;
         CheckUpdates = _settings.CheckUpdates;
-        PasscodeAcknowledged = _settings.PasscodeAcknowledged;
         PreferUsbA = _settings.PreferUsbA;
     }
 
@@ -127,7 +119,6 @@ public sealed class SettingsViewModel : ObservableObject
         _settings.DebugLogging = DebugLogging;
         _settings.AutoInstallDrivers = AutoInstallDrivers;
         _settings.CheckUpdates = CheckUpdates;
-        _settings.PasscodeAcknowledged = PasscodeAcknowledged;
         _settings.PreferUsbA = PreferUsbA;
         _settings.Save();
         _setStatus("Settings saved.");

@@ -5,8 +5,12 @@
   <ScrollViewer VerticalScrollBarVisibility="Auto" DataContext="{Binding SettingsVm}">
     <StackPanel Margin="28,20,28,28" MaxWidth="820" HorizontalAlignment="Left">
       <Grid>
-        <TextBlock Text="Settings" Style="{StaticResource Text.Title}"/>
-        <ui:Button Content="Save" Appearance="Primary" HorizontalAlignment="Right"
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Text="Settings" Style="{StaticResource Text.Title}"/>
+        <ui:Button Grid.Column="1" Content="Save" Appearance="Primary" HorizontalAlignment="Right"
                    Command="{Binding SaveCommand}"/>
       </Grid>
 
@@ -28,8 +32,12 @@
       <ui:Card VerticalAlignment="Stretch">
         <StackPanel>
           <Grid>
-            <TextBlock Text="Default jailbreak mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ComboBox HorizontalAlignment="Right" MinWidth="160"
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Default jailbreak mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ComboBox Grid.Column="1" HorizontalAlignment="Right" MinWidth="160"
                       ItemsSource="{Binding JailbreakModes}"
                       SelectedItem="{Binding JailbreakMode, Mode=TwoWay}"/>
           </Grid>
@@ -37,43 +45,56 @@
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <TextBlock Text="Safe mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding SafeMode}"/>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Safe mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding SafeMode}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <TextBlock Text="Verbose boot" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding VerboseBoot}"/>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Verbose boot" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding VerboseBoot}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <TextBlock Text="Debug logging" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding DebugLogging}"/>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Debug logging" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding DebugLogging}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <TextBlock Text="Auto-install drivers" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding AutoInstallDrivers}"/>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Auto-install drivers" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding AutoInstallDrivers}"/>
           </Grid>
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
           <Grid>
-            <TextBlock Text="Passcode acknowledged" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding PasscodeAcknowledged}"/>
-          </Grid>
-
-          <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
-
-          <Grid>
-            <TextBlock Text="Prefer USB-A cable" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-            <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding PreferUsbA}"/>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Prefer USB-A cable" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding PreferUsbA}"/>
           </Grid>
         </StackPanel>
       </ui:Card>
@@ -81,8 +102,12 @@
       <TextBlock Text="APPLICATION" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card VerticalAlignment="Stretch">
         <Grid>
-          <TextBlock Text="Check for updates at startup" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-          <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding CheckUpdates}"/>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Check for updates at startup" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+          <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" IsChecked="{Binding CheckUpdates}"/>
         </Grid>
       </ui:Card>
     </StackPanel>
