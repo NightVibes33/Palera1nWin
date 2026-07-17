@@ -9,10 +9,14 @@
 *.sln.docstates
 
 # Build results
+# NOTE: deliberately NOT ignoring [Rr]elease/ or [Rr]eleases/ here — those
+# patterns match ANY directory with that name at any depth (no leading slash),
+# which silently swallowed our own source folder src/Palera1nWin.Core/Releases/
+# (GitHubReleasesClient.cs, PongoCompatibility.cs never made it into any commit
+# because of this). Actual Release-config build output already lives under
+# bin/Release/ and obj/Release/, which [Bb]in/ and [Oo]bj/ below already cover.
 [Dd]ebug/
 [Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
 x64/
 x86/
 [Ww][Ii][Nn]32/

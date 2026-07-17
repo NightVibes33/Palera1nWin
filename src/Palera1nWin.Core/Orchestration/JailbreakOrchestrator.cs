@@ -454,110 +454,217 @@ public sealed class JailbreakOrchestrator : IDisposable
                 return false;
             }
 
-            var wsl = new WslService(_settings.WslDistro);
-            var attachProgress = new Progress<string>(msg => ForwardLog(this, new LogLine
-            {
-                Source = "usbipd",
-                Message = msg,
-            }));
+            // palera1n -D over usbipd is flaky: it often prints "Whoops, device did not
+            // enter DFU mode" and then loops forever on "Waiting for device to reconnect",
+            // and it can also hang at "Entering recovery mode" when the re-enumerated
+            // device isn't re-attached to WSL. Both are exactly the hangs you hit and had
+            // to fix with a manual Cancel + Start Jailbreak. This loop automates that:
+            // it monitors the host, auto-continues the moment the device is really in DFU
+            // (openra1n does its own checkm8 from clean DFU), and otherwise force-stops a
+            // stuck helper and retries the whole DFU dance a bounded number of times.
+            const int maxDfuAttempts = 4;
+            var dfuReached = false;
 
-            Report(JailbreakStage.EnsuringDfuDriver, "Attaching Apple USB to WSL (required for Waiting for devices)...", 18);
-            var attach = await _usbipdService.EnsureAppleAttachedToWslAsync(
-                _settings.WslDistro,
-                wsl,
-                attachProgress,
-                cancellationToken).ConfigureAwait(false);
-
-            if (!attach.Succeeded)
+            for (var attempt = 1; attempt <= maxDfuAttempts && !dfuReached; attempt++)
             {
-                Fail(attach.Message);
-                if (attach.UsbDkDetected)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Device may already be in DFU/Pongo (a prior attempt landed it, or the
+                // user entered DFU manually) — skip straight to openra1n.
+                if (HostHasDfuDevice() || IsPongoPresent())
                 {
+                    dfuReached = true;
+                    break;
+                }
+
+                var wsl = new WslService(_settings.WslDistro);
+                var attachProgress = new Progress<string>(msg => ForwardLog(this, new LogLine
+                {
+                    Source = "usbipd",
+                    Message = msg,
+                }));
+
+                Report(
+                    JailbreakStage.EnsuringDfuDriver,
+                    attempt == 1
+                        ? "Attaching Apple USB to WSL (required for Waiting for devices)..."
+                        : $"DFU retry {attempt}/{maxDfuAttempts}: re-attaching Apple USB to WSL...",
+                    18);
+
+                var attach = await _usbipdService.EnsureAppleAttachedToWslAsync(
+                    _settings.WslDistro,
+                    wsl,
+                    attachProgress,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!attach.Succeeded)
+                {
+                    if (attempt == 1)
+                    {
+                        Fail(attach.Message);
+                        if (attach.UsbDkDetected)
+                        {
+                            ForwardLog(this, new LogLine
+                            {
+                                Source = "usbipd",
+                                Message =
+                                    "UsbDk conflicts with usbipd. Uninstall UsbDk (Add/Remove Programs), reboot, then retry.",
+                                IsError = true,
+                            });
+                        }
+
+                        return false;
+                    }
+
                     ForwardLog(this, new LogLine
                     {
                         Source = "usbipd",
-                        Message =
-                            "UsbDk conflicts with usbipd. Uninstall UsbDk (Add/Remove Programs), reboot, then retry.",
+                        Message = $"{attach.Message} — retrying attach...",
                         IsError = true,
                     });
+                    UsbipdService.KillLeftoverUsbBridges();
+                    await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
 
-                return false;
-            }
-
-            ForwardLog(this, new LogLine
-            {
-                Source = "orchestrator",
-                Message = attach.Message,
-            });
-
-            ForwardLog(this, new LogLine
-            {
-                Source = "orchestrator",
-                Message =
-                    "Starting DFU helper. When palera1n prints \"Press Enter when ready for DFU mode\", " +
-                    "an OK/Cancel dialog will appear — not before.",
-            });
-
-            var dfuMissed = false;
-            void OnDfuLog(object? sender, LogLine line)
-            {
-                if (line.Message.Contains("Whoops, device did not enter DFU mode", StringComparison.OrdinalIgnoreCase))
+                ForwardLog(this, new LogLine { Source = "orchestrator", Message = attach.Message });
+                ForwardLog(this, new LogLine
                 {
-                    dfuMissed = true;
+                    Source = "orchestrator",
+                    Message = attempt == 1
+                        ? "Starting DFU helper. When palera1n prints \"Press Enter when ready for DFU mode\", an OK/Cancel dialog will appear — not before."
+                        : $"Starting DFU helper (attempt {attempt}/{maxDfuAttempts}). Get ready for the button sequence again when the dialog appears.",
+                });
+
+                var dfuMissed = false;
+                var dfuPromptShown = false;
+                void OnDfuLog(object? sender, LogLine line)
+                {
+                    if (line.Message.Contains("Whoops, device did not enter DFU mode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dfuMissed = true;
+                    }
+                    else if (line.Message.Contains("Press Enter when ready for DFU mode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dfuPromptShown = true;
+                    }
                 }
-            }
 
-            _palera1nHostService.LogReceived += OnDfuLog;
-            int exit;
-            try
-            {
-                exit = await _palera1nHostService.RunDfuHelperAsync(
-                    toolchainRoot,
-                    _settings.WslDistro,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _palera1nHostService.LogReceived -= OnDfuLog;
-            }
+                _palera1nHostService.LogReceived += OnDfuLog;
 
-            ForwardLog(this, new LogLine
-            {
-                Source = "orchestrator",
-                Message = $"DFU helper exited with code {exit}.",
-                IsError = exit != 0,
-            });
+                using var helperCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var helperExit = 0;
+                var helperEndedNaturally = false;
+                try
+                {
+                    var attemptStart = DateTimeOffset.UtcNow;
+                    var helperTask = _palera1nHostService.RunDfuHelperAsync(
+                        toolchainRoot,
+                        _settings.WslDistro,
+                        helperCts.Token);
 
-            if (exit != 0 && !dfuMissed)
-            {
-                Fail($"DFU helper failed with exit code {exit}. Check the log above (FIFO/GUI prompt errors are fatal).");
-                return false;
-            }
+                    // Only give up on an attempt AFTER "Whoops" (the user is no longer
+                    // holding buttons by then), so we never cut off a valid countdown.
+                    DateTimeOffset? missedAt = null;
+                    while (!helperTask.IsCompleted)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
 
-            if (dfuMissed)
-            {
-                // "Whoops" means palera1n's checkm8 didn't fire — but the device may still be
-                // in DFU (user pressed buttons, just bad timing). If it IS in DFU, continue
-                // to openra1n which does its own checkm8 from clean DFU. Don't make the user
-                // click Start Jailbreak twice.
-                _monitor.PollNow();
-                var afterMiss = _monitor.ScanDevices()
-                    .FirstOrDefault(d => d.IsPresent && d.ProductId == 0x1227 && d.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu);
+                        if (HostHasDfuDevice() || IsPongoPresent())
+                        {
+                            dfuReached = true;
+                            ForwardLog(this, new LogLine
+                            {
+                                Source = "orchestrator",
+                                Message = "Device is in DFU on Windows — stopping the DFU helper and continuing to openra1n automatically.",
+                            });
+                            helperCts.Cancel();
+                            break;
+                        }
 
-                if (afterMiss is not null)
+                        if (dfuMissed)
+                        {
+                            missedAt ??= DateTimeOffset.UtcNow;
+                            if (DateTimeOffset.UtcNow - missedAt > TimeSpan.FromSeconds(8))
+                            {
+                                ForwardLog(this, new LogLine
+                                {
+                                    Source = "orchestrator",
+                                    Message = "palera1n missed DFU and is looping on \"Waiting for device to reconnect\" — stopping this attempt.",
+                                    IsError = true,
+                                });
+                                helperCts.Cancel();
+                                break;
+                            }
+                        }
+                        else if (!dfuPromptShown && DateTimeOffset.UtcNow - attemptStart > TimeSpan.FromSeconds(30))
+                        {
+                            // palera1n's own "Entering recovery mode" wait has NO timeout of its
+                            // own (dfuhelper.c blocks on a usbmuxd/libirecovery device-event that
+                            // never fires if the bridge misses the Normal->Recovery re-enumeration).
+                            // This is the exact hang you hit twice — stop and retry instead of
+                            // waiting forever for an event that isn't coming.
+                            ForwardLog(this, new LogLine
+                            {
+                                Source = "orchestrator",
+                                Message = "palera1n has not reached the DFU prompt yet (likely stuck entering recovery mode — the device re-enumeration was probably missed). Stopping this attempt.",
+                                IsError = true,
+                            });
+                            helperCts.Cancel();
+                            break;
+                        }
+
+                        // Wake as soon as the helper finishes OR ~750ms elapses to re-poll.
+                        await Task.WhenAny(helperTask, Task.Delay(750, cancellationToken)).ConfigureAwait(false);
+                    }
+
+                    try
+                    {
+                        helperExit = await helperTask.ConfigureAwait(false);
+                        helperEndedNaturally = !dfuReached;
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        // Expected: we intentionally stopped the helper (DFU reached or stuck loop).
+                    }
+                }
+                finally
+                {
+                    _palera1nHostService.LogReceived -= OnDfuLog;
+                }
+
+                // A force-stopped helper can't run its own cleanup, so clear any orphaned
+                // elevated USB bridge before the next attempt / before openra1n.
+                UsbipdService.KillLeftoverUsbBridges();
+
+                if (dfuReached || HostHasDfuDevice())
+                {
+                    dfuReached = true;
+                    break;
+                }
+
+                // Helper ended on its own with an error that isn't a DFU-timing miss
+                // (e.g. FIFO/GUI-prompt failure, runtime missing) — retrying won't help.
+                if (helperEndedNaturally && helperExit != 0 && !dfuMissed)
+                {
+                    Fail($"DFU helper failed with exit code {helperExit} (not a DFU timing miss). See the log above.");
+                    return false;
+                }
+
+                if (attempt < maxDfuAttempts)
                 {
                     ForwardLog(this, new LogLine
                     {
                         Source = "orchestrator",
-                        Message =
-                            "DFU helper reported Whoops, but device IS in DFU — continuing to openra1n " +
-                            "(openra1n does its own checkm8 from clean DFU).",
+                        Message = $"DFU not entered (attempt {attempt}/{maxDfuAttempts}). Retrying automatically — a new DFU prompt will appear shortly.",
                     });
+                    await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    Fail("Device did not enter DFU. Retry Start Jailbreak and follow the button timers carefully.");
+                    Fail(
+                        $"Device did not enter DFU after {maxDfuAttempts} automatic attempts. " +
+                        "iPhone 8/X sequence: hold Side + Volume Down together ~8s, then release Side but KEEP holding Volume Down until the screen stays black, then click OK. Click Start Jailbreak to try again.");
                     return false;
                 }
             }
@@ -617,6 +724,20 @@ public sealed class JailbreakOrchestrator : IDisposable
         }
 
         return _monitor.IsPongoVisibleInUsbipd();
+    }
+
+    /// <summary>
+    /// True when a real DFU device (05AC:1227) is present on the Windows host.
+    /// Used to short-circuit palera1n's flaky "Waiting for device to reconnect"
+    /// loop the moment the device is actually in DFU.
+    /// </summary>
+    private bool HostHasDfuDevice()
+    {
+        _monitor.PollNow();
+        return _monitor.ScanDevices().Any(d =>
+            d.IsPresent &&
+            d.ProductId == 0x1227 &&
+            d.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu);
     }
 
     private static async Task StopAmdsIfPresentAsync(string toolchainRoot, CancellationToken cancellationToken)
