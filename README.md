@@ -25,16 +25,20 @@ Production-grade **Windows GUI** for [palera1n](https://github.com/palera1n/pale
 
 ## Supported devices
 
+Palera1nWin follows [palera1n's own device support](https://docs.palera.in/docs/reference/compatibility-chart/) exactly — it's per-model, not just per-chip, so not every device sharing a supported SoC is necessarily included (e.g. iPhone 6/6 Plus are A8 but are **not** on palera1n's supported list).
+
 | Chip | Devices | Status |
 |------|---------|--------|
-| **A11** (T8015) | iPhone 8, iPhone 8 Plus, iPhone X | Supported (passcode/Biometric must be off) |
-| **A10** (T8010) | iPhone 7, iPhone 7 Plus, iPad (6th gen), iPod touch (7th gen) | Supported |
-| **A9** (S8000/S8003) | iPhone 6s/6s Plus, iPad (5th gen), iPad Pro 9.7 | Supported |
-| **A8** (A8/A8X) | iPhone 6/6 Plus, iPad mini 4, Apple TV HD | Supported |
-| **A7** (A7) | iPhone 5s, iPad Air, iPad mini 2/3 | Supported |
-| A12+ | iPhone XS and newer | **Not supported** (checkm8 is A7–A11 only) |
+| **A11** | iPhone 8, iPhone 8 Plus, iPhone X | Supported (passcode must stay disabled) |
+| **A10 / A10X** | iPhone 7, iPhone 7 Plus, iPad (6th/7th gen), iPad Pro 10.5", iPad Pro 12.9" (2nd gen), iPod touch (7th gen), Apple TV 4K (1st gen) | Supported |
+| **A9 / A9X** | iPhone 6s, iPhone 6s Plus, iPhone SE (2016), iPad (5th gen), iPad Pro 9.7", iPad Pro 12.9" (1st gen) | Supported |
+| **A8 / A8X** | iPad mini 4, iPad Air 2, Apple TV HD | Supported |
+| A7 and earlier | iPhone 5s, iPad Air (1st gen), iPad mini 2/3, etc. | **Not supported** by palera1n |
+| A12 and newer | iPhone XS and newer | **Not supported** (checkm8 is A8–A11 only) |
 
-> **A11 note:** On iPhone 8 / 8 Plus / X you **must** disable passcode & Touch ID before jailbreaking. On iOS 16, an old passcode may still force stock boots until erase/restore — see [palera1n troubleshooting](https://docs.palera.in/docs/troubleshoot/troubleshooting-steps/).
+Apple T2-equipped Macs are also jailbreakable by palera1n, but use a separate restore-mode flow this GUI does not cover.
+
+> **A11 note:** On iPhone 8 / 8 Plus / X you **must** disable passcode & Touch ID before jailbreaking. On iOS 16+, you need to reset the device (and keep the passcode disabled) before proceeding — see [palera1n's compatibility chart](https://docs.palera.in/docs/reference/compatibility-chart/) for details.
 
 ---
 
