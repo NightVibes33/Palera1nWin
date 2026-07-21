@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -38,6 +39,9 @@ public sealed record ToolchainPaths(
 
 public sealed class ToolProcessRunner
 {
+    private const int ErrorAccessDenied = 5;
+    private const int ErrorCancelled = 1223;
+
     public async Task<ToolResult> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
@@ -134,6 +138,10 @@ public sealed class ToolProcessRunner
         {
             throw new PlatformNotSupportedException("Driver operations are Windows-only.");
         }
+        if (!File.Exists(fileName))
+        {
+            throw new FileNotFoundException("The elevated tool was not found.", fileName);
+        }
 
         var argumentText = string.Join(' ', arguments.Select(QuoteForCommandLine));
         var startInfo = new ProcessStartInfo
@@ -151,23 +159,50 @@ public sealed class ToolProcessRunner
     private static async Task<ToolResult> RunElevatedCoreAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("The elevated process did not start.");
-        using var registration = cancellationToken.Register(() =>
+        Process process;
+        try
         {
-            try
+            process = Process.Start(startInfo) ?? throw new InvalidOperationException("The elevated process did not start.");
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
+        {
+            throw new InvalidOperationException(
+                $"Windows administrator approval was cancelled. DarkSword did not install the Apple DFU libusbK driver. " +
+                $"Run Palera1nWin as administrator, retry the downgrade, and choose Yes on the User Account Control prompt for {Path.GetFileName(startInfo.FileName)}.",
+                exception);
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorAccessDenied)
+        {
+            throw new InvalidOperationException(
+                $"Windows blocked administrator access for {Path.GetFileName(startInfo.FileName)}. " +
+                "Run Palera1nWin as administrator and allow the driver installer through Windows Security if it was blocked.",
+                exception);
+        }
+
+        using (process)
+        using (var registration = cancellationToken.Register(() =>
+               {
+                   try
+                   {
+                       if (!process.HasExited) process.Kill(entireProcessTree: true);
+                   }
+                   catch
+                   {
+                       // Best-effort cancellation of an elevated child process.
+                   }
+               }))
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+            var result = new ToolResult(startInfo.FileName, startInfo.Arguments, process.ExitCode, string.Empty, string.Empty, stopwatch.Elapsed);
+            if (!result.Success)
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                throw new InvalidOperationException(
+                    $"{Path.GetFileName(startInfo.FileName)} could not install the Apple DFU libusbK driver and exited with code {result.ExitCode}. " +
+                    "Reconnect the device in DFU mode, run Palera1nWin as administrator, and retry.");
             }
-            catch
-            {
-                // Best-effort cancellation of an elevated child process.
-            }
-        });
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        stopwatch.Stop();
-        var result = new ToolResult(startInfo.FileName, startInfo.Arguments, process.ExitCode, string.Empty, string.Empty, stopwatch.Elapsed);
-        if (!result.Success) throw new InvalidOperationException($"Elevated tool exited with code {result.ExitCode}.");
-        return result;
+            return result;
+        }
     }
 
     private static string QuoteForLog(string value) => value.Any(char.IsWhiteSpace) ? $"\"{value}\"" : value;
