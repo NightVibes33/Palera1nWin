@@ -1,4 +1,4 @@
-﻿<ui:FluentWindow x:Class="Palera1nWin.App.MainWindow"
+<ui:FluentWindow x:Class="Palera1nWin.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -58,6 +58,11 @@
           <ui:NavigationViewItem Content="Jailbreak" TargetPageType="{x:Type views:JailbreakView}">
             <ui:NavigationViewItem.Icon>
               <ui:SymbolIcon Symbol="Home24"/>
+            </ui:NavigationViewItem.Icon>
+          </ui:NavigationViewItem>
+          <ui:NavigationViewItem Content="Downgrade" TargetPageType="{x:Type views:DowngradeView}">
+            <ui:NavigationViewItem.Icon>
+              <ui:SymbolIcon Symbol="ArrowDownload24"/>
             </ui:NavigationViewItem.Icon>
           </ui:NavigationViewItem>
           <ui:NavigationViewItem Content="Device" TargetPageType="{x:Type views:DeviceView}">
