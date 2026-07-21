@@ -22,6 +22,7 @@ Copy-Item (Join-Path $NativeDirectory "*") $toolchain -Recurse -Force
 
 $required = @(
     "openra1n.exe",
+    "openra1n-core.exe",
     "turdus_merula.exe",
     "darksword-pongo.exe",
     "wdi-simple.exe",
