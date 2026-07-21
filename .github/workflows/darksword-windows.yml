@@ -91,13 +91,18 @@ jobs:
           -c Release
           -r win-x64
           --self-contained true
-          --no-build
           -o DarkSwordRestore/artifacts/publish
 
       - name: Package complete release
         shell: pwsh
         run: |
-          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ github.run_number }}-${{ github.sha }}".Substring(0, [Math]::Min(20, "${{ github.run_number }}-${{ github.sha }}".Length)) }
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}"
+          }
+          else {
+            $rawVersion = "${{ github.run_number }}-${{ github.sha }}"
+            $version = $rawVersion.Substring(0, [Math]::Min(20, $rawVersion.Length))
+          }
           ./DarkSwordRestore/scripts/package-release.ps1 `
             -PublishDirectory "DarkSwordRestore/artifacts/publish" `
             -NativeDirectory "DarkSwordRestore/artifacts/native" `
