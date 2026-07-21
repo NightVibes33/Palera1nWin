@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Media;
 using Palera1nWin.App.Services;
 using Palera1nWin.App.ViewModels;
@@ -14,6 +14,7 @@ public partial class MainWindow : FluentWindow
     private static readonly Type[] TabPages =
     [
         typeof(JailbreakView),
+        typeof(DowngradeView),
         typeof(DeviceView),
         typeof(VersionsView),
         typeof(SetupView),
@@ -22,6 +23,8 @@ public partial class MainWindow : FluentWindow
         typeof(AboutView),
     ];
 
+    private readonly PageService _pageService;
+
     public MainWindow(MainViewModel viewModel, int? initialTab = null)
     {
         InitializeComponent();
@@ -29,13 +32,20 @@ public partial class MainWindow : FluentWindow
 
         FitToWorkArea();
 
-        RootNavigation.SetPageProviderService(new PageService(viewModel));
+        _pageService = new PageService(viewModel);
+        RootNavigation.SetPageProviderService(_pageService);
         viewModel.NavigateRequested += NavigateToTab;
 
         Loaded += (_, _) =>
         {
             int tab = initialTab is int t && t >= 0 && t < TabPages.Length ? t : 0;
             NavigateToTab(tab);
+        };
+
+        Closed += (_, _) =>
+        {
+            viewModel.NavigateRequested -= NavigateToTab;
+            _pageService.Dispose();
         };
     }
 

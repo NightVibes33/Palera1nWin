@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DarkSwordRestore.Core/DarkSwordRestore.Core.csproj" />
+    <Project Path="src/DarkSwordRestore.App/DarkSwordRestore.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj" />
+  </Folder>
+</Solution>

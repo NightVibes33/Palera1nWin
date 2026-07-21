@@ -91,6 +91,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void NavigateTo(int tabIndex) => NavigateRequested?.Invoke(tabIndex);
 
+    public void SetStatusText(string text) => SetStatus(text);
+
+    public void AppendLog(string source, string message, bool isError = false) =>
+        _logService.Append(source, message, isError);
+
     private void SetStatus(string text) =>
         System.Windows.Application.Current?.Dispatcher.Invoke(() => StatusText = text);
 

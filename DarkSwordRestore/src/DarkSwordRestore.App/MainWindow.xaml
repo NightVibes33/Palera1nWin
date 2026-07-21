@@ -1,0 +1,191 @@
+<Window x:Class="DarkSwordRestore.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DarkSword Restore" Width="1180" Height="820" MinWidth="980" MinHeight="700"
+        WindowStartupLocation="CenterScreen">
+  <Window.Resources>
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="18" />
+      <Setter Property="Margin" Value="0,0,12,12" />
+    </Style>
+    <Style x:Key="MutedText" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="{StaticResource Panel2Brush}" />
+    </Style>
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="{StaticResource DangerBrush}" />
+    </Style>
+  </Window.Resources>
+
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <Grid Grid.Row="0" Margin="0,0,0,18">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock Text="DarkSword Restore" FontSize="28" FontWeight="Bold" />
+        <TextBlock Text="Native Windows blobless tethered downgrade and boot utility for iPad 5th generation" Style="{StaticResource MutedText}" Margin="0,5,0,0" />
+      </StackPanel>
+      <Border Grid.Column="1" Background="#1B2433" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="20" Padding="14,7" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal">
+          <Ellipse x:Name="DeviceDot" Width="9" Height="9" Fill="{StaticResource MutedBrush}" Margin="0,0,8,0" />
+          <TextBlock x:Name="HeaderDeviceText" Text="No iPad connected" FontWeight="SemiBold" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.Row="1" Margin="0,0,0,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <Border Grid.Column="0" Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="DEVICE MODE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" />
+          <TextBlock x:Name="DeviceModeText" Text="Disconnected" FontSize="21" FontWeight="SemiBold" Margin="0,7,0,0" />
+          <TextBlock x:Name="DeviceDetailsText" Text="Connect iPad6,11 or iPad6,12" Style="{StaticResource MutedText}" Margin="0,5,0,0" />
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="TOOLCHAIN" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" />
+          <TextBlock x:Name="ToolchainStateText" Text="Checking" FontSize="21" FontWeight="SemiBold" Margin="0,7,0,0" />
+          <TextBlock x:Name="ToolchainDetailsText" Text="Checking bundled Windows tools" Style="{StaticResource MutedText}" Margin="0,5,0,0" />
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,0,12">
+        <StackPanel>
+          <TextBlock Text="CURRENT STAGE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" />
+          <TextBlock x:Name="CurrentStageText" Text="Idle" FontSize="21" FontWeight="SemiBold" Margin="0,7,0,0" />
+          <TextBlock x:Name="CurrentDetailText" Text="Select a task below" Style="{StaticResource MutedText}" Margin="0,5,0,0" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <TabControl Grid.Row="2" Background="Transparent" BorderThickness="0" x:Name="MainTabs">
+      <TabItem Header="Downgrade">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+          <StackPanel>
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="1. Select the official Apple IPSW" FontSize="19" FontWeight="SemiBold" />
+                <TextBlock Text="The firmware may be unsigned by Apple today, but it must be the original iPad6,11/iPad6,12 IPSW." Style="{StaticResource MutedText}" Margin="0,5,0,14" />
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <TextBox x:Name="IpswPathBox" VerticalContentAlignment="Center" IsReadOnly="True" />
+                  <Button Grid.Column="1" Content="Browse IPSW" Click="BrowseIpsw_Click" Margin="10,0,10,0" />
+                  <Button Grid.Column="2" Content="Inspect" Click="InspectIpsw_Click" Style="{StaticResource SecondaryButton}" Margin="0" />
+                </Grid>
+                <Border Background="#101722" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,14,0,0">
+                  <TextBlock x:Name="IpswSummaryText" Text="No firmware selected." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                </Border>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="2. Confirm the destructive and tethered behavior" FontSize="19" FontWeight="SemiBold" />
+                <TextBlock Text="These checks are required because the restore erases the iPad and the resulting system cannot cold-boot by itself." Style="{StaticResource MutedText}" Margin="0,5,0,8" />
+                <CheckBox x:Name="EraseCheck" Content="I understand that all data on the iPad will be erased." Checked="ConfirmationChanged" Unchecked="ConfirmationChanged" />
+                <CheckBox x:Name="TetherCheck" Content="I understand that every restart, shutdown, or dead battery requires a Windows tether boot." Checked="ConfirmationChanged" Unchecked="ConfirmationChanged" />
+                <CheckBox x:Name="OwnershipCheck" Content="This is my device, and I can complete normal Apple activation after the restore." Checked="ConfirmationChanged" Unchecked="ConfirmationChanged" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="3. Run the complete A9 workflow" FontSize="19" FontWeight="SemiBold" />
+                  <TextBlock Text="DarkSword will guide DFU entry between pre-restore SHC, restore, post-restore SHC, PTE creation, and the first tether boot." Style="{StaticResource MutedText}" Margin="0,5,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                  <Button x:Name="StartDowngradeButton" Content="Start Full Downgrade" Click="StartDowngrade_Click" IsEnabled="False" />
+                  <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="0" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Tether Boot">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+          <StackPanel>
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="Boot an existing downgraded installation" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Select the device-specific PTE block saved by DarkSword, enter DFU mode, and boot without a Pico board." Style="{StaticResource MutedText}" Margin="0,5,0,16" />
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <TextBox x:Name="PtePathBox" IsReadOnly="True" VerticalContentAlignment="Center" />
+                  <Button Grid.Column="1" Content="Browse PTE Block" Click="BrowsePte_Click" Margin="10,0,0,0" />
+                </Grid>
+                <Button x:Name="TetherBootButton" Content="Start Tether Boot" Click="TetherBoot_Click" HorizontalAlignment="Left" Margin="0,16,0,0" IsEnabled="False" />
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="iPad 5 DFU sequence" FontSize="19" FontWeight="SemiBold" />
+                <TextBlock Text="1. Connect with a direct USB-A to Lightning cable.&#x0a;2. Hold Power + Home for 8 seconds.&#x0a;3. Release Power while continuing to hold Home for about 10 seconds.&#x0a;4. The screen must remain completely black." Style="{StaticResource MutedText}" Margin="0,9,0,0" LineHeight="23" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Diagnostics">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+          <StackPanel>
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="Setup doctor" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Checks administrator status, required executables, resources, current Apple USB mode, and available storage." Style="{StaticResource MutedText}" Margin="0,5,0,14" />
+                <StackPanel Orientation="Horizontal">
+                  <Button Content="Run Diagnostics" Click="RunDiagnostics_Click" />
+                  <Button Content="Open Logs Folder" Click="OpenLogs_Click" Style="{StaticResource SecondaryButton}" />
+                  <Button Content="Open Sessions Folder" Click="OpenSessions_Click" Style="{StaticResource SecondaryButton}" Margin="0" />
+                </StackPanel>
+                <TextBox x:Name="DiagnosticsBox" Margin="0,16,0,0" Height="250" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Logs">
+        <Grid Margin="0,14,0,0">
+          <Border Style="{StaticResource Card}" Margin="0">
+            <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+          </Border>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <Grid Grid.Row="3" Margin="0,14,0,0">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+      <ProgressBar x:Name="OperationProgress" Height="7" Minimum="0" Maximum="100" Value="0" Background="#202838" Foreground="{StaticResource AccentBrush}" />
+      <Grid Grid.Row="1" Margin="0,8,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock x:Name="FooterStatusText" Text="Ready" Foreground="{StaticResource MutedBrush}" />
+        <TextBlock Grid.Column="1" Text="iPad6,11 / iPad6,12 • A9 • Windows x64" Foreground="{StaticResource MutedBrush}" />
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>
