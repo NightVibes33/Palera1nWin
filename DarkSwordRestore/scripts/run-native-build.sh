@@ -57,6 +57,20 @@ if "Patched libDER __unused compatibility for MinGW" not in text:
         raise SystemExit("Could not locate the turdus resource-build insertion point")
     text = text.replace(marker, compatibility_patch + marker, 1)
 
+# Libtool creates src/idevicerestore.exe as a launcher that expects the real
+# program in src/.libs. Copying only that launcher produces exit code 127 in
+# the portable ZIP. Stage the actual PE restore engine instead.
+old_turdus_copy = 'cp src/idevicerestore.exe "$STAGE/turdus_merula.exe"'
+new_turdus_copy = '''TURDUS_BINARY="$BUILD/idevicerestore/src/.libs/idevicerestore.exe"
+if [[ ! -s "$TURDUS_BINARY" ]]; then
+  echo "The real libtool turdus executable was not produced: $TURDUS_BINARY" >&2
+  exit 7
+fi
+cp "$TURDUS_BINARY" "$STAGE/turdus_merula.exe"'''
+if old_turdus_copy not in text:
+    raise SystemExit("Could not locate the turdus executable copy step")
+text = text.replace(old_turdus_copy, new_turdus_copy, 1)
+
 # Preserve the original Windows openra1n binary as the core checkm8/PongoOS
 # engine. Its upstream Makefile names the output "openra1n" even though MinGW
 # creates "openra1n.exe", causing the strip step to fail. Correct BIN before
@@ -71,8 +85,8 @@ make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
-gcc -std=c11 -O2 -Wall -Wextra -municode \\
-  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
+gcc -std=c11 -O2 -Wall -Wextra -municode \
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \
   -o "$STAGE/openra1n.exe"
 '''
 if old_openra1n not in text:
