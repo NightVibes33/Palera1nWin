@@ -20,6 +20,11 @@ New-Item $toolchainResources -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $PublishDirectory "*") $stage -Recurse -Force
 Copy-Item (Join-Path $NativeDirectory "*") $toolchain -Recurse -Force
 
+$appExecutable = Join-Path $stage "Palera1nWin.exe"
+if (-not (Test-Path $appExecutable -PathType Leaf)) {
+    throw "The unified Palera1nWin.exe frontend was not published."
+}
+
 $required = @(
     "openra1n.exe",
     "openra1n-core.exe",
@@ -40,19 +45,21 @@ foreach ($relativePath in $required) {
     }
 }
 
-Copy-Item (Join-Path $projectRoot "README.md") (Join-Path $stage "README.md") -Force
+Copy-Item (Join-Path $projectRoot "README.md") (Join-Path $stage "README-DARKSWORD.md") -Force
 Copy-Item (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") (Join-Path $stage "THIRD_PARTY_NOTICES.md") -Force
 
 @"
-DarkSword Restore $Version
+Palera1nWin + DarkSword Restore $Version
 
 1. Extract the complete ZIP before running it.
 2. Install Apple Devices or desktop iTunes so Windows has Apple's normal/recovery drivers.
-3. Right-click DarkSwordRestore.exe and choose Run as administrator.
-4. Use a direct USB-A to Lightning connection whenever possible.
-5. Keep the generated session folder and PTE block backed up.
+3. Right-click Palera1nWin.exe and choose Run as administrator.
+4. Open the Downgrade page in the existing Palera1nWin sidebar.
+5. Select one untouched iPad6,11 or iPad6,12 iOS 15 IPSW and run Inspect.
+6. Use a direct USB-A to Lightning connection whenever possible.
+7. Keep the generated session folder and PTE block backed up.
 
-The app and its toolchain must remain in the same folder.
+Palera1nWin.exe and the toolchain folder must remain together.
 "@ | Set-Content (Join-Path $stage "START-HERE.txt") -Encoding UTF8
 
 $stageFullPath = [System.IO.Path]::GetFullPath($stage)
