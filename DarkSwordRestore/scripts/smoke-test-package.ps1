@@ -9,7 +9,7 @@ $releaseRoot = Split-Path -Parent $PackageRoot
 $logDirectory = Join-Path $PackageRoot "smoke-logs"
 $statusLog = Join-Path $logDirectory "smoke-status.txt"
 New-Item -ItemType Directory -Force $logDirectory | Out-Null
-"DarkSword deterministic package smoke test" | Set-Content $statusLog -Encoding UTF8
+"Palera1nWin DarkSword deterministic package smoke test" | Set-Content $statusLog -Encoding UTF8
 
 function Write-Status([string]$Message) {
     Add-Content -LiteralPath $statusLog -Value $Message -Encoding UTF8
@@ -88,7 +88,7 @@ function Invoke-CapturedProcess {
 
 try {
     $requiredPe = @(
-        "DarkSwordRestore.exe",
+        "Palera1nWin.exe",
         "toolchain\turdus_merula.exe",
         "toolchain\openra1n.exe",
         "toolchain\openra1n-core.exe",
@@ -99,6 +99,11 @@ try {
     foreach ($relative in $requiredPe) {
         Assert-Pe $relative
     }
+
+    Assert-File "Palera1nWin.dll" 1024 | Out-Null
+    Assert-File "DarkSwordRestore.Core.dll" 1024 | Out-Null
+    Assert-BinaryString "Palera1nWin.dll" "DowngradeView"
+    Assert-BinaryString "Palera1nWin.dll" "DarkSwordRestore.Core"
 
     Assert-File "toolchain\native-build-manifest.txt" 32 | Out-Null
     Assert-File "toolchain\resources\sep_racer.bin" 128 | Out-Null
@@ -173,7 +178,7 @@ try {
         throw "Release ZIP SHA-256 mismatch."
     }
     Write-Status "OK release ZIP SHA-256 $actualZipHash"
-    Write-Status "Package smoke test passed. Physical DFU/restore testing remains required."
+    Write-Status "Unified Palera1nWin package smoke test passed. Physical DFU/restore testing remains required."
 }
 catch {
     Write-Status "FAILED: $($_.Exception.Message)"
