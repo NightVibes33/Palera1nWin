@@ -22,21 +22,39 @@ try
         Write(archive, "Firmware/dfu/iBSS.ipad.RELEASE.im4p", "ibss");
         Write(archive, "Firmware/dfu/iBEC.ipad.RELEASE.im4p", "ibec");
         Write(archive, "Firmware/all_flash/sep-firmware.j71.RELEASE.im4p", "sep");
-        var padding = archive.CreateEntry("058-00000-001.dmg", CompressionLevel.NoCompression);
-        using var stream = padding.Open();
-        stream.SetLength(500L * 1024L * 1024L);
+        Write(archive, "058-00000-001.dmg", new string('0', 4096));
     }
 
     var inspection = await new IpswInspector().InspectAsync(ipswPath);
     Check(inspection.IsValid, "Valid iPad 5 IPSW fixture was rejected.");
     Check(inspection.SupportsIpad5, "iPad 5 support was not detected.");
     Check(inspection.ProductVersion == "15.4.1", "ProductVersion was not parsed.");
+    Check(inspection.Warnings.Any(x => x.Contains("unusually small", StringComparison.OrdinalIgnoreCase)), "Small fixture warning was not emitted.");
+
+    var invalidPath = Path.Combine(root, "wrong-device.ipsw");
+    using (var archive = ZipFile.Open(invalidPath, ZipArchiveMode.Create))
+    {
+        Write(archive, "BuildManifest.plist", """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <plist version="1.0"><dict>
+              <key>ProductVersion</key><string>15.4.1</string>
+              <key>SupportedProductTypes</key><array><string>iPhone8,1</string></array>
+            </dict></plist>
+            """);
+        Write(archive, "Restore.plist", "<plist version=\"1.0\"><dict/></plist>");
+        Write(archive, "Firmware/dfu/iBSS.phone.RELEASE.im4p", "ibss");
+        Write(archive, "Firmware/dfu/iBEC.phone.RELEASE.im4p", "ibec");
+        Write(archive, "Firmware/all_flash/sep-firmware.phone.RELEASE.im4p", "sep");
+    }
+    var invalid = await new IpswInspector().InspectAsync(invalidPath);
+    Check(!invalid.IsValid, "Wrong-device firmware was accepted.");
 
     var sessionDirectory = Path.Combine(root, "session");
-    var session = new RestoreSession("test", sessionDirectory, ipswPath, inspection, "pre.bin", "pte.bin", RestoreStage.Completed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+    var session = new RestoreSession("test", sessionDirectory, ipswPath, inspection, "post-shc.bin", "pte.bin", RestoreStage.Completed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
     await SessionStore.SaveAsync(session);
     var loaded = await SessionStore.LoadAsync(sessionDirectory);
     Check(loaded?.PteBlockPath == "pte.bin", "Session persistence failed.");
+    Check(loaded?.LastStage == RestoreStage.Completed, "Session stage persistence failed.");
 
     Check(Enum.IsDefined(RestoreStage.BootingXnu), "Restore stage enum is incomplete.");
 }
