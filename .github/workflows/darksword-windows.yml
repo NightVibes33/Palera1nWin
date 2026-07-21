@@ -1,0 +1,127 @@
+name: DarkSword Windows Build
+
+on:
+  push:
+    branches:
+      - darksword-restore
+    tags:
+      - "darksword-v*"
+    paths:
+      - "DarkSwordRestore/**"
+      - ".github/workflows/darksword-windows.yml"
+  pull_request:
+    paths:
+      - "DarkSwordRestore/**"
+      - ".github/workflows/darksword-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: darksword-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set up MSYS2 MinGW64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            git
+            autoconf
+            automake
+            libtool
+            make
+            pkgconf
+            python
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-readline
+            mingw-w64-x86_64-libplist
+            mingw-w64-x86_64-libimobiledevice-glue
+            mingw-w64-x86_64-libusbmuxd
+            mingw-w64-x86_64-libimobiledevice
+            mingw-w64-x86_64-libirecovery
+
+      - name: Build native Windows toolchain
+        shell: msys2 {0}
+        run: bash DarkSwordRestore/scripts/build-native.sh
+
+      - name: Restore managed projects
+        run: dotnet restore DarkSwordRestore/DarkSwordRestore.sln
+
+      - name: Build managed projects
+        run: dotnet build DarkSwordRestore/DarkSwordRestore.sln -c Release --no-restore -warnaserror
+
+      - name: Run self-tests
+        run: dotnet run --project DarkSwordRestore/tests/DarkSwordRestore.SelfTest/DarkSwordRestore.SelfTest.csproj -c Release --no-build
+
+      - name: Publish portable Windows app
+        run: >-
+          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-build
+          -o DarkSwordRestore/artifacts/publish
+
+      - name: Package complete release
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ github.run_number }}-${{ github.sha }}".Substring(0, [Math]::Min(20, "${{ github.run_number }}-${{ github.sha }}".Length)) }
+          ./DarkSwordRestore/scripts/package-release.ps1 `
+            -PublishDirectory "DarkSwordRestore/artifacts/publish" `
+            -NativeDirectory "DarkSwordRestore/artifacts/native" `
+            -OutputDirectory "DarkSwordRestore/artifacts/release" `
+            -Version $version
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-Restore-win-x64
+          path: |
+            DarkSwordRestore/artifacts/release/*.zip
+            DarkSwordRestore/artifacts/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create tagged GitHub release
+        if: startsWith(github.ref, 'refs/tags/darksword-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            DarkSwordRestore/artifacts/release/*.zip `
+            DarkSwordRestore/artifacts/release/SHA256SUMS.txt `
+            --title "DarkSword Restore ${{ github.ref_name }}" `
+            --generate-notes
