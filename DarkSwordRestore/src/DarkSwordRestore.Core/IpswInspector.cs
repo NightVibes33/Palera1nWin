@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace DarkSwordRestore.Core;
@@ -11,6 +12,10 @@ public sealed class IpswInspector
         "BuildManifest.plist",
         "Restore.plist"
     };
+
+    private static readonly Regex ProductTypePattern = new(
+        @"^(?:iPhone|iPad|iPod)\d+,\d+$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async Task<IpswInspectionResult> InspectAsync(string path, CancellationToken cancellationToken = default)
     {
@@ -84,7 +89,7 @@ public sealed class IpswInspector
                         {
                             foreach (var type in document.Descendants("string")
                                          .Select(x => x.Value)
-                                         .Where(x => x.StartsWith("iPad6,", StringComparison.Ordinal)))
+                                         .Where(x => ProductTypePattern.IsMatch(x)))
                             {
                                 productTypes.Add(type);
                             }
@@ -119,13 +124,14 @@ public sealed class IpswInspector
             errors.Add($"The IPSW could not be read: {ex.Message}");
         }
 
-        if (!productTypes.Contains("iPad6,11") && !productTypes.Contains("iPad6,12"))
+        if (!productTypes.Any(DarkSwordDeviceCatalog.IsSupported))
         {
-            errors.Add("This firmware is not for iPad6,11 or iPad6,12 (iPad 5th generation).");
+            var listed = productTypes.Count == 0 ? "no ProductType" : string.Join(", ", productTypes.OrderBy(x => x, StringComparer.Ordinal));
+            errors.Add($"This firmware targets {listed}. DarkSword supports iOS/iPadOS devices with A9 through A10X chips only.");
         }
         if (productVersion is not null && !productVersion.StartsWith("15.", StringComparison.Ordinal))
         {
-            warnings.Add($"Target version is {productVersion}; the validated DarkSword flow is designed for iOS/iPadOS 15.x.");
+            warnings.Add($"Target version is {productVersion}; the in-app downloader is intentionally limited to iOS/iPadOS 15.x.");
         }
 
         return new IpswInspectionResult(
