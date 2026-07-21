@@ -55,17 +55,18 @@ DarkSword Restore $Version
 The app and its toolchain must remain in the same folder.
 "@ | Set-Content (Join-Path $stage "START-HERE.txt") -Encoding UTF8
 
-$manifest = Get-ChildItem $stage -Recurse -File | ForEach-Object {
-    $relative = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
+$stageFullPath = [System.IO.Path]::GetFullPath($stage)
+$manifest = Get-ChildItem $stageFullPath -Recurse -File | ForEach-Object {
+    $relative = [System.IO.Path]::GetRelativePath($stageFullPath, $_.FullName).Replace('\', '/')
     $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     [PSCustomObject]@{ path = $relative; sha256 = $hash; size = $_.Length }
 }
-$manifest | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $stage "manifest.json") -Encoding UTF8
+$manifest | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $stageFullPath "manifest.json") -Encoding UTF8
 
 New-Item $OutputDirectory -ItemType Directory -Force | Out-Null
 $zip = Join-Path $OutputDirectory "DarkSword-Restore-$Version-win-x64.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $stageFullPath "*") -DestinationPath $zip -CompressionLevel Optimal
 
 $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$zipHash  $(Split-Path $zip -Leaf)" | Set-Content (Join-Path $OutputDirectory "SHA256SUMS.txt") -Encoding ASCII
