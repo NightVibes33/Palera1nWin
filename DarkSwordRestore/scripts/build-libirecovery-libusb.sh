@@ -102,8 +102,17 @@ text = re.sub(
     text,
 )
 
+# MinGW does not expose the legacy BSD bzero symbol. The async transfer code
+# only needs a zero-initialized structure, so use the portable C equivalent.
+text = text.replace(
+    "bzero(&transfer, sizeof(struct irecv_async_transfer));",
+    "memset(&transfer, 0, sizeof(struct irecv_async_transfer));",
+)
+
 if "IRECV_FORCE_LIBUSB" not in text or "IRECV_K_PONGO_MODE" not in text:
     raise SystemExit("The libusb/Pongo source patch did not apply")
+if "bzero(&transfer" in text:
+    raise SystemExit("The MinGW bzero compatibility patch did not apply")
 source.write_text(text, encoding="utf-8")
 PY
 
