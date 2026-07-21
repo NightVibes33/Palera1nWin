@@ -113,7 +113,6 @@ jobs:
             -c Release `
             -r win-x64 `
             --self-contained true `
-            --no-restore `
             -o DarkSwordRestore/build/publish
 
       - name: Package complete portable release
