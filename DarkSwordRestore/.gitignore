@@ -1,0 +1,8 @@
+artifacts/
+bin/
+obj/
+.native-build/
+sessions/
+logs/
+toolchain/native/
+toolchain/resources/*.bin
