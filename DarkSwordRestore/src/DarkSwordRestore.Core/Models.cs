@@ -59,7 +59,13 @@ public sealed record IpswInspectionResult(
     IReadOnlyList<string> Warnings)
 {
     [JsonIgnore]
+    public bool SupportsDarkSword => SupportedProductTypes.Any(DarkSwordDeviceCatalog.IsSupported);
+
+    [JsonIgnore]
     public bool SupportsIpad5 => SupportedProductTypes.Any(x => x is "iPad6,11" or "iPad6,12");
+
+    public bool MatchesProductType(string? productType) =>
+        productType is not null && SupportedProductTypes.Contains(productType, StringComparer.Ordinal);
 }
 
 public sealed record RestoreProgress(
