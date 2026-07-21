@@ -18,6 +18,7 @@ set -x
 export PATH="/mingw64/bin:/usr/bin:$PATH"
 export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig:/mingw64/share/pkgconfig"
 export MAKEFLAGS="-j2"
+export CPPFLAGS="${CPPFLAGS:-} -D__unused="
 
 build_autotools() {
   local repository="$1"
