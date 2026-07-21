@@ -3,6 +3,8 @@ name: DarkSword Publish Diagnostics
 on:
   push:
     branches: [darksword-restore]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
