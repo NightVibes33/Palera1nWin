@@ -111,7 +111,7 @@ pushd "$WORK_ROOT/source"
 CPPFLAGS="${CPPFLAGS:-} -DIRECV_FORCE_LIBUSB" \
   ./autogen.sh \
     --prefix=/mingw64 \
-    --without-tools \
+    --with-tools \
     --without-udev
 make -j2
 make install
