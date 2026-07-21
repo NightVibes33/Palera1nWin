@@ -26,6 +26,11 @@ build_autotools() {
   shift 3
   git clone --depth 1 --branch "$ref" "$repository" "$BUILD/$directory"
   pushd "$BUILD/$directory"
+  # libfragmentzip derives its pkg-config version from the repository commit
+  # count. A depth-1 clone reports version 1, while turdus requires >=54.
+  if [[ "$directory" == "libfragmentzip" ]]; then
+    git fetch --unshallow --tags
+  fi
   ./autogen.sh --prefix=/mingw64 "$@"
   make
   make install
@@ -35,6 +40,12 @@ build_autotools() {
 # These two dependencies are not available as complete MSYS2 packages.
 build_autotools "https://github.com/libimobiledevice/libtatsu.git" master libtatsu
 build_autotools "https://github.com/turdus-m3rula/libfragmentzip.git" non-libgeneral libfragmentzip
+
+fragmentzip_version="$(pkg-config --modversion libfragmentzip)"
+if [[ ! "$fragmentzip_version" =~ ^[0-9]+$ ]] || (( fragmentzip_version < 54 )); then
+  echo "libfragmentzip pkg-config version is $fragmentzip_version; turdus requires >=54" >&2
+  exit 5
+fi
 
 # Clone the LGPL turdus idevicerestore fork.
 git clone --depth 1 --branch sephaxx \
@@ -213,6 +224,7 @@ done
   echo "openra1n=$(git -C "$BUILD/openra1n" rev-parse HEAD)"
   echo "libtatsu=$(git -C "$BUILD/libtatsu" rev-parse HEAD)"
   echo "libfragmentzip=$(git -C "$BUILD/libfragmentzip" rev-parse HEAD)"
+  echo "libfragmentzip-version=$fragmentzip_version"
 } > "$STAGE/native-build-manifest.txt"
 
 sha256sum "$STAGE"/*.exe "$STAGE"/resources/*.bin > "$STAGE/native-SHA256SUMS.txt"
