@@ -57,6 +57,25 @@ if "Patched libDER __unused compatibility for MinGW" not in text:
         raise SystemExit("Could not locate the turdus resource-build insertion point")
     text = text.replace(marker, compatibility_patch + marker, 1)
 
+# Preserve the original Windows openra1n binary as the core checkm8/PongoOS
+# engine. The user-facing executable then waits for that engine, assigns
+# libusbK to PongoOS PID 0x4141, and returns only after the new driver is ready.
+old_openra1n = '''make LIBUSB=1
+cp openra1n.exe "$STAGE/openra1n.exe"
+popd
+'''
+new_openra1n = '''make LIBUSB=1
+cp openra1n.exe "$STAGE/openra1n-core.exe"
+popd
+
+gcc -std=c11 -O2 -Wall -Wextra -municode \\
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
+  -o "$STAGE/openra1n.exe"
+'''
+if old_openra1n not in text:
+    raise SystemExit("Could not locate the openra1n packaging block")
+text = text.replace(old_openra1n, new_openra1n, 1)
+
 path.write_text(text, encoding="utf-8", newline="\n")
 PY
 
