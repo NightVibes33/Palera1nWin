@@ -130,24 +130,6 @@ jobs:
             -OutputDirectory "DarkSwordRestore/build/release" `
             -Version $version
 
-      - name: Smoke-test packaged executables
-        shell: pwsh
-        run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'DarkSwordRestore/build/release/DarkSword-Restore-win-x64/toolchain'
-          $help = & (Join-Path $root 'turdus_merula.exe') --help 2>&1 | Out-String
-          if ($help -notmatch 'get-shcblock' -or $help -notmatch 'get-pteblock') {
-            throw 'turdus_merula.exe is missing the required turdus operations.'
-          }
-          & (Join-Path $root 'darksword-pongo.exe') 2>$null
-          if ($LASTEXITCODE -ne 1) {
-            throw "Unexpected darksword-pongo usage exit code: $LASTEXITCODE"
-          }
-          $irecovery = Get-ChildItem $root -Filter 'libirecovery-1.0*.dll' | Select-Object -First 1
-          if (-not $irecovery) {
-            throw 'The packaged libusb-backed libirecovery DLL is missing.'
-          }
-          $global:LASTEXITCODE = 0
-
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
@@ -157,6 +139,21 @@ jobs:
             DarkSwordRestore/build/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Smoke-test packaged executables
+        shell: pwsh
+        run: |
+          ./DarkSwordRestore/scripts/smoke-test-package.ps1 `
+            -PackageRoot "DarkSwordRestore/build/release/DarkSword-Restore-win-x64"
+
+      - name: Upload smoke-test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-smoke-test-log-${{ github.run_number }}
+          path: DarkSwordRestore/build/release/DarkSword-Restore-win-x64/smoke-logs/**
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publish tagged GitHub release
         if: startsWith(github.ref, 'refs/tags/darksword-v')
