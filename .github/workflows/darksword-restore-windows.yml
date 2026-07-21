@@ -85,18 +85,23 @@ jobs:
             mingw-w64-x86_64-xz
             mingw-w64-x86_64-bzip2
 
+      - name: Build Windows libirecovery libusbK backend
+        shell: msys2 {0}
+        run: bash DarkSwordRestore/scripts/build-libirecovery-libusb.sh
+
       - name: Build native Windows toolchain
         shell: msys2 {0}
-        env:
-          CFLAGS: -DIRECV_K_PONGO_MODE=0x4141
         run: bash DarkSwordRestore/scripts/build-native-final.sh
 
-      - name: Upload native build log
+      - name: Upload native build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: DarkSword-native-build-log-${{ github.run_number }}
-          path: DarkSwordRestore/build/native-build.log
+          path: |
+            DarkSwordRestore/build/native-build.log
+            DarkSwordRestore/build/libirecovery-libusb-build.log
+            DarkSwordRestore/build/libirecovery-libusb-dependencies.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -136,6 +141,10 @@ jobs:
           & (Join-Path $root 'darksword-pongo.exe') 2>$null
           if ($LASTEXITCODE -ne 1) {
             throw "Unexpected darksword-pongo usage exit code: $LASTEXITCODE"
+          }
+          $irecovery = Get-ChildItem $root -Filter 'libirecovery-1.0*.dll' | Select-Object -First 1
+          if (-not $irecovery) {
+            throw 'The packaged libusb-backed libirecovery DLL is missing.'
           }
 
       - name: Upload Windows package
