@@ -14,6 +14,7 @@ public partial class DowngradeView
         if (_experienceHooksWired) return;
         _experienceHooksWired = true;
         InitializeDowngradeExperience();
+        InitializeOperationalExperience();
 
         StartDowngradeButton.Click -= StartDowngrade_Click;
         StartDowngradeButton.Click += StartEnhancedDowngrade_Click;
@@ -46,6 +47,7 @@ public partial class DowngradeView
 
     private async void Experience_Loaded(object sender, RoutedEventArgs e)
     {
+        InitializeOperationalExperience();
         try
         {
             UpdateExperienceDeviceState(await _monitor.ProbeAsync());
@@ -174,9 +176,10 @@ public partial class DowngradeView
             var stage = exception is DarkSwordException darkSword ? darkSword.Stage : RestoreStage.Failed;
             HandleEnhancedProgress(new RestoreProgress(stage == RestoreStage.Completed ? RestoreStage.Failed : RestoreStage.Failed, OperationProgress.Value, "Downgrade stopped", exception.Message));
             AppendLog(exception.ToString());
+            var guidance = DowngradeFailureTranslator.Translate(exception.Message, stage);
             ShowMessage(
-                exception.Message + "\n\nOpen Recovery & Targeted Retry to resume from the newest safe checkpoint.",
-                "Downgrade stopped",
+                guidance.DisplayText + "\n\nOpen Recovery & Targeted Retry to resume from the newest safe checkpoint.",
+                guidance.Title,
                 MessageBoxImage.Error);
         }
         finally
