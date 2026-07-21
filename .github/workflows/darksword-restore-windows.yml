@@ -140,6 +140,8 @@ jobs:
             'turdus_merula.exe',
             'darksword-pongo.exe',
             'wdi-simple.exe',
+            'ideviceinfo.exe',
+            'irecovery.exe',
             'libusb-1.0.dll',
             'resources/sep_racer.bin',
             'resources/kpf.bin'
