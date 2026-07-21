@@ -80,7 +80,7 @@ public partial class DowngradeView : UserControl, IDisposable
     private void UpdateDeviceUi(AppleDeviceSnapshot snapshot)
     {
         DeviceModeLabel.Text = snapshot.Mode.ToString();
-        DeviceDetailsText.Text = snapshot.DisplayName ?? snapshot.InstanceId ?? "Connect iPad6,11 or iPad6,12";
+        DeviceDetailsText.Text = snapshot.DisplayName ?? snapshot.InstanceId ?? "Connect a supported A9-A10X Apple device";
 
         Brush stateBrush = snapshot.Mode switch
         {
@@ -116,7 +116,7 @@ public partial class DowngradeView : UserControl, IDisposable
         {
             ToolchainStateText.Text = "Ready";
             ToolchainStateText.Foreground = ResourceBrush("Brush.Success");
-            ToolchainDetailsText.Text = "All native restore components are packaged";
+            ToolchainDetailsText.Text = "Restore, ProductType detection, and DFU components are packaged";
         }
         else
         {
@@ -132,7 +132,7 @@ public partial class DowngradeView : UserControl, IDisposable
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Select official iPad 5 IPSW",
+            Title = "Select an official Apple iOS or iPadOS IPSW",
             Filter = "Apple firmware (*.ipsw)|*.ipsw|All files (*.*)|*.*",
             CheckFileExists = true
         };
@@ -161,10 +161,28 @@ public partial class DowngradeView : UserControl, IDisposable
         try
         {
             _inspection = await _inspector.InspectAsync(IpswPathBox.Text);
+            if (_inspection.IsValid &&
+                !string.IsNullOrWhiteSpace(DetectedProductType) &&
+                !_inspection.MatchesProductType(DetectedProductType))
+            {
+                var errors = _inspection.Errors
+                    .Concat(new[]
+                    {
+                        $"The connected device is {DetectedProductType}, but this IPSW targets {string.Join(", ", _inspection.SupportedProductTypes)}."
+                    })
+                    .ToArray();
+                _inspection = _inspection with { IsValid = false, Errors = errors };
+            }
+
             var builder = new StringBuilder();
-            builder.AppendLine(_inspection.IsValid ? "VALID IPAD 5 IPSW" : "IPSW VALIDATION FAILED");
+            builder.AppendLine(_inspection.IsValid ? "VALID SUPPORTED APPLE IPSW" : "IPSW VALIDATION FAILED");
             builder.AppendLine($"Version: {_inspection.ProductVersion ?? "Unknown"} ({_inspection.BuildVersion ?? "unknown build"})");
-            builder.AppendLine($"Models: {string.Join(", ", _inspection.SupportedProductTypes)}");
+            builder.AppendLine($"ProductTypes: {string.Join(", ", _inspection.SupportedProductTypes)}");
+            if (!string.IsNullOrWhiteSpace(DetectedProductType))
+            {
+                builder.AppendLine($"Connected ProductType: {DetectedProductType}");
+                builder.AppendLine($"Exact match: {_inspection.MatchesProductType(DetectedProductType)}");
+            }
             builder.AppendLine($"Size: {_inspection.FileSize / 1024d / 1024d / 1024d:F2} GB");
             builder.AppendLine($"SHA-256: {_inspection.Sha256}");
             foreach (var warning in _inspection.Warnings)
@@ -189,7 +207,7 @@ public partial class DowngradeView : UserControl, IDisposable
         }
         finally
         {
-            SetBusy(false, "Ready", "Review the firmware result and confirmations");
+            SetBusy(false, "Ready", "Review the exact-device firmware result and confirmations");
         }
     }
 
@@ -197,17 +215,21 @@ public partial class DowngradeView : UserControl, IDisposable
 
     private async void StartDowngrade_Click(object sender, RoutedEventArgs e)
     {
-        if (_inspection?.IsValid != true)
+        if (!IsActiveRestoreTargetReady())
         {
+            ShowMessage(
+                "The active Windows restore path requires a detected A9/A9X device and an inspected iOS/iPadOS 15 IPSW that contains that exact ProductType.",
+                "Restore target not ready",
+                MessageBoxImage.Information);
             return;
         }
 
         _operationCts = new CancellationTokenSource();
-        SetBusy(true, "Starting downgrade", "Preparing the complete DarkSword restore workflow");
+        SetBusy(true, "Starting downgrade", "Preparing the complete chip-specific DarkSword restore workflow");
         try
         {
             var session = await _orchestrator.RunFullDowngradeAsync(
-                _inspection.Path,
+                _inspection!.Path,
                 EraseCheck.IsChecked == true && TetherCheck.IsChecked == true && OwnershipCheck.IsChecked == true,
                 new Progress<RestoreProgress>(UpdateProgress),
                 AppendLog,
@@ -215,7 +237,7 @@ public partial class DowngradeView : UserControl, IDisposable
 
             PtePathBox.Text = session.PteBlockPath ?? string.Empty;
             ShowMessage(
-                $"The downgrade workflow completed.\n\nPTE block:\n{session.PteBlockPath}\n\nKeep the complete session folder backed up.",
+                $"The downgrade workflow completed.\n\nBoot asset:\n{session.PteBlockPath}\n\nKeep the complete session folder backed up.",
                 "Downgrade complete",
                 MessageBoxImage.Information);
         }
@@ -242,8 +264,8 @@ public partial class DowngradeView : UserControl, IDisposable
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Select DarkSword PTE block",
-            Filter = "PTE block (*.bin)|*.bin|All files (*.*)|*.*",
+            Title = "Select a DarkSword tether-boot asset",
+            Filter = "DarkSword block (*.bin)|*.bin|All files (*.*)|*.*",
             CheckFileExists = true
         };
 
@@ -258,7 +280,7 @@ public partial class DowngradeView : UserControl, IDisposable
 
     private async void TetherBoot_Click(object sender, RoutedEventArgs e)
     {
-        if (!File.Exists(PtePathBox.Text))
+        if (!File.Exists(PtePathBox.Text) || !IsActiveA9TetherBootTarget())
         {
             return;
         }
@@ -298,13 +320,14 @@ public partial class DowngradeView : UserControl, IDisposable
 
     private async void RunDiagnostics_Click(object sender, RoutedEventArgs e)
     {
-        SetBusy(true, "Diagnostics", "Checking Windows, device, storage, and native components");
+        SetBusy(true, "Diagnostics", "Checking Windows, exact device identity, storage, and native components");
         try
         {
             var snapshot = await _monitor.ProbeAsync();
             var root = Path.GetPathRoot(AppContext.BaseDirectory) ?? "C:\\";
             var drive = new DriveInfo(root);
             var resources = Path.Combine(_tools.Root, "resources");
+            var detected = DarkSwordDeviceCatalog.Find(DetectedProductType);
             DiagnosticsBox.Text = string.Join(Environment.NewLine, new[]
             {
                 $"Administrator: {IsAdministrator()}",
@@ -312,10 +335,16 @@ public partial class DowngradeView : UserControl, IDisposable
                 $"Process: {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}",
                 $"Toolchain: {_tools.Root}",
                 $"Missing tools: {(_tools.MissingFiles().Count == 0 ? "none" : string.Join(", ", _tools.MissingFiles().Select(Path.GetFileName)))}",
+                $"ideviceinfo.exe: {File.Exists(Path.Combine(_tools.Root, "ideviceinfo.exe"))}",
+                $"irecovery.exe: {File.Exists(Path.Combine(_tools.Root, "irecovery.exe"))}",
                 $"sep_racer.bin: {File.Exists(Path.Combine(resources, "sep_racer.bin"))}",
                 $"kpf.bin: {File.Exists(Path.Combine(resources, "kpf.bin"))}",
                 $"Device mode: {snapshot.Mode}",
                 $"Device: {snapshot.DisplayName ?? "not detected"}",
+                $"ProductType: {DetectedProductType ?? "unresolved"}",
+                $"Supported device: {detected is not null}",
+                $"Chip: {detected?.Chip.ToString() ?? "unknown"}",
+                $"Active native restore path: {(detected?.UsesA9SepBlocks == true ? "A9/A9X SHC/PTE" : "not available for this chip")}",
                 $"USB service: {snapshot.Service ?? "n/a"}",
                 $"Disk free: {drive.AvailableFreeSpace / 1024d / 1024d / 1024d:F1} GB",
                 $"DarkSword log: {_logPath}",
@@ -379,8 +408,8 @@ public partial class DowngradeView : UserControl, IDisposable
             && File.Exists(Path.Combine(resources, "sep_racer.bin"))
             && File.Exists(Path.Combine(resources, "kpf.bin"));
 
-        StartDowngradeButton.IsEnabled = !_busy && confirmations && toolchainReady && _inspection?.IsValid == true;
-        TetherBootButton.IsEnabled = !_busy && toolchainReady && File.Exists(PtePathBox.Text);
+        StartDowngradeButton.IsEnabled = !_busy && confirmations && toolchainReady && IsActiveRestoreTargetReady();
+        TetherBootButton.IsEnabled = !_busy && toolchainReady && IsActiveA9TetherBootTarget() && File.Exists(PtePathBox.Text);
         CancelButton.IsEnabled = _busy;
         InspectIpswButton.IsEnabled = !_busy;
     }
@@ -432,6 +461,7 @@ public partial class DowngradeView : UserControl, IDisposable
         }
 
         _disposed = true;
+        DisposeFirmwareFeatures();
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _operationCts = null;
