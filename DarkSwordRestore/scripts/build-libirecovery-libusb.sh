@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-WORK_ROOT="${RUNNER_TEMP:-/tmp}/darksword-libirecovery"
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  RUNNER_TEMP_UNIX="$(cygpath -u "$RUNNER_TEMP")"
+else
+  RUNNER_TEMP_UNIX="/tmp"
+fi
+WORK_ROOT="$RUNNER_TEMP_UNIX/darksword-libirecovery"
 LOG_ROOT="$(cygpath -u "${GITHUB_WORKSPACE:?}")/DarkSwordRestore/build"
 LOG_PATH="$LOG_ROOT/libirecovery-libusb-build.log"
 
