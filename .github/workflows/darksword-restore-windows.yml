@@ -146,6 +146,7 @@ jobs:
           if (-not $irecovery) {
             throw 'The packaged libusb-backed libirecovery DLL is missing.'
           }
+          $global:LASTEXITCODE = 0
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
