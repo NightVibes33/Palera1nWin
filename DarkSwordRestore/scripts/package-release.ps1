@@ -9,25 +9,38 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $OutputDirectory "DarkSword-Restore-win-x64"
-$toolchainNative = Join-Path $stage "toolchain\native"
-$toolchainResources = Join-Path $stage "toolchain\resources"
+$toolchain = Join-Path $stage "toolchain"
+$toolchainResources = Join-Path $toolchain "resources"
 
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $stage -ItemType Directory -Force | Out-Null
-New-Item $toolchainNative -ItemType Directory -Force | Out-Null
+New-Item $toolchain -ItemType Directory -Force | Out-Null
 New-Item $toolchainResources -ItemType Directory -Force | Out-Null
 
 Copy-Item (Join-Path $PublishDirectory "*") $stage -Recurse -Force
+Copy-Item (Join-Path $NativeDirectory "*") $toolchain -Recurse -Force
 
-$resourceNames = @("sep_racer.bin", "kpf.bin", "cpf.bin", "overlay.bin", "union.bin")
-Get-ChildItem $NativeDirectory -File | ForEach-Object {
-    if ($resourceNames -contains $_.Name) {
-        Copy-Item $_.FullName (Join-Path $toolchainResources $_.Name) -Force
+$required = @(
+    "openra1n.exe",
+    "turdus_merula.exe",
+    "darksword-pongo.exe",
+    "wdi-simple.exe",
+    "libusb-1.0.dll",
+    "resources\sep_racer.bin",
+    "resources\kpf.bin"
+)
+foreach ($relativePath in $required) {
+    $path = Join-Path $toolchain $relativePath
+    if (-not (Test-Path $path -PathType Leaf)) {
+        throw "Missing packaged component: $relativePath"
     }
-    else {
-        Copy-Item $_.FullName (Join-Path $toolchainNative $_.Name) -Force
+    if ((Get-Item $path).Length -eq 0) {
+        throw "Packaged component is empty: $relativePath"
     }
 }
+
+Copy-Item (Join-Path $projectRoot "README.md") (Join-Path $stage "README.md") -Force
+Copy-Item (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") (Join-Path $stage "THIRD_PARTY_NOTICES.md") -Force
 
 @"
 DarkSword Restore $Version
@@ -36,6 +49,7 @@ DarkSword Restore $Version
 2. Install Apple Devices or desktop iTunes so Windows has Apple's normal/recovery drivers.
 3. Right-click DarkSwordRestore.exe and choose Run as administrator.
 4. Use a direct USB-A to Lightning connection whenever possible.
+5. Keep the generated session folder and PTE block backed up.
 
 The app and its toolchain must remain in the same folder.
 "@ | Set-Content (Join-Path $stage "START-HERE.txt") -Encoding UTF8
