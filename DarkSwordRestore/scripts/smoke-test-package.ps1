@@ -57,6 +57,35 @@ function Assert-BinaryString([string]$RelativePath, [string]$Expected) {
     Write-Status "OK capability $RelativePath :: $Expected"
 }
 
+function Invoke-CapturedProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $stdout = Join-Path $logDirectory "$Name.stdout.txt"
+    $stderr = Join-Path $logDirectory "$Name.stderr.txt"
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    $process = Start-Process `
+        -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory $toolchain `
+        -RedirectStandardOutput $stdout `
+        -RedirectStandardError $stderr `
+        -NoNewWindow `
+        -Wait `
+        -PassThru
+
+    $output = @()
+    if (Test-Path $stdout) { $output += Get-Content $stdout -Raw }
+    if (Test-Path $stderr) { $output += Get-Content $stderr -Raw }
+    return [PSCustomObject]@{
+        ExitCode = $process.ExitCode
+        Output = ($output -join [Environment]::NewLine)
+    }
+}
+
 try {
     $requiredPe = @(
         "DarkSwordRestore.exe",
@@ -76,9 +105,17 @@ try {
     Assert-File "toolchain\resources\kpf.bin" 128 | Out-Null
     Assert-File "manifest.json" 32 | Out-Null
 
-    Assert-BinaryString "toolchain\turdus_merula.exe" "get-shcblock"
-    Assert-BinaryString "toolchain\turdus_merula.exe" "get-pteblock"
-    Assert-BinaryString "toolchain\turdus_merula.exe" "load-shcblock"
+    $turdusHelp = Invoke-CapturedProcess `
+        -FilePath (Join-Path $toolchain "turdus_merula.exe") `
+        -ArgumentList @("--help") `
+        -Name "turdus-help"
+    foreach ($operation in @("get-shcblock", "get-pteblock", "load-shcblock")) {
+        if (-not $turdusHelp.Output.Contains($operation, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "turdus_merula.exe help output is missing required operation '$operation'. Exit code: $($turdusHelp.ExitCode)"
+        }
+        Write-Status "OK turdus help operation $operation"
+    }
+
     Assert-BinaryString "toolchain\darksword-pongo.exe" "DarkSword Pongo Bridge"
     Assert-BinaryString "toolchain\darksword-pongo.exe" "--pteblock"
     Assert-BinaryString "toolchain\darksword-pongo.exe" "sep pwn_pte"
