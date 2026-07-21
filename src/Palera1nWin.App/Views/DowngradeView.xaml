@@ -9,7 +9,7 @@
         <StackPanel>
           <TextBlock Text="Downgrade" Style="{StaticResource Text.Title}"/>
           <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
-                     Text="Device-aware iOS and iPadOS 15 firmware downloads, guided DFU entry, tethered restore, and tether boot."/>
+                     Text="Exact-device iOS/iPadOS 15 downloads, repairable preflight, visual DFU guidance, recoverable restore stages, and verified tether boot."/>
         </StackPanel>
         <Border x:Name="DeviceModeBadge" HorizontalAlignment="Right" VerticalAlignment="Top"
                 Style="{StaticResource Badge}" Background="#26343F52">
@@ -24,7 +24,7 @@
 
       <ui:InfoBar Margin="0,20,0,0" Severity="Warning" IsOpen="True" IsClosable="False"
                   Title="A tethered downgrade erases the device and requires a computer for every cold boot"
-                  Message="Back up first. Activation Lock is not removed. Keep the generated session files and boot assets backed up."/>
+                  Message="Preflight, exact ProductType confirmation, and the complete backup checklist are required. Activation Lock is not removed."/>
 
       <TextBlock Text="CONNECTED DEVICE &amp; IOS 15 IPSW DOWNLOADER"
                  Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
@@ -43,7 +43,15 @@
                        Click="RefreshFirmware_Click"/>
           </Grid>
 
-          <ListView x:Name="FirmwareList" Margin="0,16,0,0" MinHeight="190" MaxHeight="300"
+          <Border Margin="0,14,0,0" Padding="12" CornerRadius="6"
+                  Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                  BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+            <TextBlock x:Name="RecommendedFirmwareText"
+                       Text="A recommended exact-device firmware appears after the catalog loads."
+                       Style="{StaticResource Text.Caption}" TextWrapping="Wrap"/>
+          </Border>
+
+          <ListView x:Name="FirmwareList" Margin="0,14,0,0" MinHeight="190" MaxHeight="300"
                     SelectionChanged="FirmwareSelectionChanged"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                     BorderThickness="1" Background="{DynamicResource ControlFillColorSecondaryBrush}">
@@ -67,13 +75,12 @@
               <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" VerticalAlignment="Center">
-              <TextBlock x:Name="FirmwareDownloadStatusText"
-                         Text="Waiting for a supported device"
+              <TextBlock x:Name="FirmwareDownloadStatusText" Text="Waiting for a supported device"
                          Style="{StaticResource Text.Caption}" TextWrapping="Wrap"/>
               <ProgressBar x:Name="FirmwareDownloadProgress" Minimum="0" Maximum="100"
                            Height="6" Margin="0,7,14,0" Visibility="Collapsed"/>
             </StackPanel>
-            <ui:Button x:Name="CancelFirmwareDownloadButton" Grid.Column="1" Content="Cancel"
+            <ui:Button x:Name="CancelFirmwareDownloadButton" Grid.Column="1" Content="Pause"
                        Appearance="Transparent" IsEnabled="False" Margin="8,0,0,0"
                        Click="CancelFirmwareDownload_Click"/>
             <ui:Button x:Name="DownloadFirmwareButton" Grid.Column="2" Content="Download &amp; Use IPSW"
@@ -93,7 +100,7 @@
           <StackPanel>
             <TextBlock Text="Selected firmware" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
             <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
-                       Text="Downloaded firmware is selected automatically. Browse remains available for an untouched Apple IPSW obtained elsewhere."/>
+                       Text="Downloads resume from the saved .partial file after a pause or network interruption. SHA-1 and BuildManifest are verified before use."/>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -111,7 +118,7 @@
                     Background="{DynamicResource ControlFillColorSecondaryBrush}"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
               <TextBlock x:Name="IpswSummaryText" Style="{StaticResource Text.Caption}"
-                         Text="Select an IPSW to verify its ProductType, version, manifest, size, and SHA-256."
+                         Text="Select an IPSW to verify ProductType, version, manifest, size, and SHA-256."
                          TextWrapping="Wrap"/>
             </Border>
           </StackPanel>
@@ -135,6 +142,30 @@
         </ui:Card>
       </Grid>
 
+      <TextBlock Text="BACKUP &amp; ACCOUNT PREPARATION" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <StackPanel>
+          <TextBlock Text="Complete every item before erasing the device" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+          <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14" TextWrapping="Wrap"
+                     Text="A backup created on a newer iOS/iPadOS release may not restore onto iOS/iPadOS 15. Keep critical photos, files, and recovery codes separately."/>
+          <CheckBox x:Name="BackupEncryptedCheck" Content="I created an encrypted Apple Devices/iTunes backup and verified it completed"
+                    Margin="0,0,0,8" Checked="EnhancedConfirmationChanged" Unchecked="EnhancedConfirmationChanged"/>
+          <CheckBox x:Name="BackupPhotosCheck" Content="I copied important photos, imported files, and app documents separately"
+                    Margin="0,0,0,8" Checked="EnhancedConfirmationChanged" Unchecked="EnhancedConfirmationChanged"/>
+          <CheckBox x:Name="BackupAuthCheck" Content="I saved authenticator recovery codes, passkeys, and other account recovery information"
+                    Margin="0,0,0,8" Checked="EnhancedConfirmationChanged" Unchecked="EnhancedConfirmationChanged"/>
+          <CheckBox x:Name="ActivationLockCheck" Content="I know the Apple ID password used by Activation Lock"
+                    Margin="0,0,0,8" Checked="EnhancedConfirmationChanged" Unchecked="EnhancedConfirmationChanged"/>
+          <CheckBox x:Name="BackupCompatibilityCheck" Content="I understand a backup made on newer system software might not restore to iOS/iPadOS 15"
+                    Checked="EnhancedConfirmationChanged" Unchecked="EnhancedConfirmationChanged"/>
+          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <ui:Button Content="Open Local Backup Folder" Click="OpenBackupFolder_Click"/>
+            <ui:Button Content="Copy Checklist" Appearance="Transparent" Margin="8,0,0,0" Click="CopyBackupChecklist_Click"/>
+          </StackPanel>
+          <TextBlock x:Name="BackupChecklistStatusText" Style="{StaticResource Text.Caption}" Margin="0,8,0,0"/>
+        </StackPanel>
+      </ui:Card>
+
       <TextBlock Text="SUPPORTED DEVICES" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
         <StackPanel>
@@ -144,11 +175,11 @@
                      Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="20"/>
           <ui:InfoBar Margin="0,14,0,0" Severity="Informational" IsOpen="True" IsClosable="False"
                       Title="Backend status"
-                      Message="Firmware detection, iOS/iPadOS 15 downloads, inspection, and DFU guidance cover the complete A9-A10X list. The native Windows SHC/PTE restore and tether-boot path is enabled for A9/A9X; A10/A10X requires its separate iBoot/SEP tether-boot backend and is not silently routed through the A9 sequence."/>
+                      Message="Detection, downloads, inspection, and DFU guidance cover A9-A10X. The current native Windows SHC/PTE restore and tether-boot backend remains enabled only for A9/A9X; unsupported chip paths are blocked rather than guessed."/>
         </StackPanel>
       </ui:Card>
 
-      <TextBlock Text="GUIDED DFU MODE" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <TextBlock Text="VISUAL GUIDED DFU MODE" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
         <StackPanel>
           <Grid>
@@ -156,7 +187,7 @@
               <TextBlock x:Name="DfuGuideTitle" Text="Connect a supported device"
                          Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
               <TextBlock x:Name="DfuGuideStepsText"
-                         Text="The exact button sequence appears after ProductType detection. iPhone 7 and 7 Plus use Volume Down; other supported devices use Home."
+                         Text="The exact button sequence appears after ProductType detection."
                          Style="{StaticResource Text.Caption}" Margin="0,5,0,0"
                          TextWrapping="Wrap" LineHeight="20"/>
             </StackPanel>
@@ -167,29 +198,85 @@
                          IsEnabled="False" Margin="8,0,0,0" Click="StartDfuGuide_Click"/>
             </StackPanel>
           </Grid>
-          <Border Margin="0,14,0,0" Padding="12" CornerRadius="6"
+
+          <Grid Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Margin="0,0,7,0" Padding="18" CornerRadius="8"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+              <StackPanel HorizontalAlignment="Center">
+                <TextBlock Text="HOLD TOGETHER" Style="{StaticResource Text.Section}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="DfuVisualPrimaryText" Text="TOP/SIDE + HOME" FontSize="22" FontWeight="Bold"
+                           Margin="0,10,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock Text="8 seconds" Style="{StaticResource Text.Caption}" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Margin="7,0,0,0" Padding="18" CornerRadius="8"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+              <StackPanel HorizontalAlignment="Center">
+                <TextBlock Text="THEN" Style="{StaticResource Text.Section}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="DfuVisualSecondaryText" Text="Release Top/Side, keep holding Home" FontSize="17" FontWeight="SemiBold"
+                           Margin="0,10,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock Text="about 10 seconds" Style="{StaticResource Text.Caption}" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <Border Margin="0,14,0,0" Padding="14" CornerRadius="6"
                   Background="{DynamicResource ControlFillColorSecondaryBrush}"
                   BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel>
+              <TextBlock x:Name="DfuLiveModeText" Text="DEVICE DISCONNECTED" FontSize="13" FontWeight="Bold"/>
               <TextBlock x:Name="DfuGuideStatusText" Text="Ready when a supported device is detected"
-                         Style="{StaticResource Text.Caption}" FontWeight="SemiBold"/>
-              <ProgressBar x:Name="DfuGuideProgress" Minimum="0" Maximum="100" Height="7" Margin="0,9,0,0"/>
+                         Style="{StaticResource Text.Body}" FontWeight="SemiBold" Margin="0,8,0,0"/>
+              <ProgressBar x:Name="DfuGuideProgress" Minimum="0" Maximum="100" Height="8" Margin="0,10,0,0"/>
+              <TextBlock Style="{StaticResource Text.Caption}" Margin="0,8,0,0" TextWrapping="Wrap"
+                         Text="A cable/computer image means Recovery Mode. Correct DFU mode keeps the screen completely black and is detected automatically."/>
             </StackPanel>
           </Border>
         </StackPanel>
       </ui:Card>
 
-      <TextBlock Text="COMPLETE WORKFLOW" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <TextBlock Text="ONE-CLICK PREFLIGHT &amp; AUTOMATIC DRIVER REPAIR" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
-        <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap" LineHeight="21">
-          <Run FontWeight="SemiBold" Text="1. Prepare — "/><Run Text="Install Apple Devices or desktop iTunes, use a direct Lightning cable, make a backup, and know the Apple ID used by Activation Lock.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="2. Detect — "/><Run Text="Connect and unlock the device in normal mode when possible. The app reads ProductType automatically and refuses manual model guessing.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="3. Download — "/><Run Text="Choose an iOS/iPadOS 15 build returned for that exact ProductType. Signed and unsigned status is informational; the tethered method does not require the target IPSW to be currently signed.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="4. Inspect — "/><Run Text="Verify the IPSW manifest and confirm it contains the connected ProductType before any destructive action is enabled.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="5. Enter DFU — "/><Run Text="Use the timed guide. A black screen is required; a cable/computer image means Recovery Mode, not DFU.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="6. Restore — "/><Run Text="The app prepares pwned DFU, performs the tethered restore, stores generated boot assets, and records every stage in the session folder.&#x0a;"/>
-          <Run FontWeight="SemiBold" Text="7. Boot later — "/><Run Text="After shutdown, restart, or a dead battery, reconnect the same device, enter DFU again, and use Tether Boot with its saved device-specific assets."/>
-        </TextBlock>
+        <StackPanel>
+          <Grid>
+            <StackPanel>
+              <TextBlock Text="Every required check must pass" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+              <TextBlock x:Name="PreflightStatusText" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
+                         Text="Select an exact-device IPSW, enter DFU, then run preflight."/>
+            </StackPanel>
+            <ui:Button x:Name="RunPreflightButton" Content="Run Full Preflight" Appearance="Primary"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Click="RunPreflight_Click"/>
+          </Grid>
+          <ItemsControl x:Name="PreflightChecksList" Margin="0,14,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Margin="0,0,0,7" Padding="10" CornerRadius="5"
+                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="32"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding Glyph}" FontSize="17" FontWeight="Bold" VerticalAlignment="Top"/>
+                    <StackPanel Grid.Column="1">
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                      <TextBlock Text="{Binding Detail}" Style="{StaticResource Text.Caption}" Margin="0,3,10,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding StateText}" Style="{StaticResource Text.Section}" VerticalAlignment="Top"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
       </ui:Card>
 
       <TextBlock Text="RESTORE PROGRESS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
@@ -198,14 +285,47 @@
           <Grid>
             <StackPanel>
               <TextBlock x:Name="CurrentStageText" Text="Ready" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
-              <TextBlock x:Name="CurrentDetailText" Text="Detect a device and select an inspected IPSW"
+              <TextBlock x:Name="CurrentDetailText" Text="Complete DFU and preflight to enable the downgrade"
                          Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"/>
             </StackPanel>
-            <ui:Button x:Name="CancelButton" Content="Cancel" Appearance="Transparent"
+            <ui:Button x:Name="CancelButton" Content="Pause / Cancel" Appearance="Transparent"
                        HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="False"
                        Click="Cancel_Click"/>
           </Grid>
           <ProgressBar x:Name="OperationProgress" Minimum="0" Maximum="100" Height="8" Margin="0,14,0,0"/>
+          <ItemsControl x:Name="RestoreStageList" Margin="0,16,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid Margin="0,0,0,7">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="30"/>
+                    <ColumnDefinition Width="230"/>
+                    <ColumnDefinition Width="90"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Text="{Binding Glyph}" FontWeight="Bold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="2" Text="{Binding State}" Style="{StaticResource Text.Section}"/>
+                  <TextBlock Grid.Column="3" Text="{Binding Detail}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ui:Card>
+
+      <TextBlock Text="RECOVERY &amp; TARGETED RETRY" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <StackPanel>
+          <TextBlock Text="Resume from the newest safe artifact" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+          <TextBlock x:Name="RecoveryStatusText" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
+                     Text="Scanning sessions for SHC, restore, PTE, or final-boot checkpoints..."/>
+          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <ui:Button x:Name="ResumeSessionButton" Content="Resume Last Session" IsEnabled="False" Click="ResumeSession_Click"/>
+            <ui:Button x:Name="RetryStageButton" Content="Retry Current Safe Stage" Appearance="Primary" IsEnabled="False"
+                       Margin="8,0,0,0" Click="RetryStage_Click"/>
+            <ui:Button Content="Refresh Recovery State" Appearance="Transparent" Margin="8,0,0,0" Click="RefreshRecovery_Click"/>
+          </StackPanel>
         </StackPanel>
       </ui:Card>
 
@@ -227,6 +347,11 @@
                       Margin="0,0,0,9" Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
             <CheckBox x:Name="OwnershipCheck" Content="I own or am authorized to restore this device"
                       Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+            <TextBlock Text="TYPE THE EXACT PRODUCTTYPE" Style="{StaticResource Text.Section}" Margin="0,16,0,5"/>
+            <TextBox x:Name="ProductTypeConfirmationBox" MinHeight="34" VerticalContentAlignment="Center"
+                     TextChanged="ProductTypeConfirmationChanged"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,5,0,0" TextWrapping="Wrap"
+                       Text="Example: iPad6,11. The text must exactly match the detected ProductType shown above."/>
             <ui:Button x:Name="StartDowngradeButton" Content="Start Full Downgrade" Appearance="Primary"
                        Padding="22,10" Margin="0,18,0,0" HorizontalAlignment="Left" IsEnabled="False"
                        Click="StartDowngrade_Click"/>
@@ -237,7 +362,7 @@
           <StackPanel>
             <TextBlock Text="Tether boot" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
             <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
-                       Text="Use the boot asset saved by a completed downgrade session after shutdown or restart."/>
+                       Text="Use the boot asset saved by a completed downgrade session after shutdown, restart, or a dead battery."/>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -247,7 +372,7 @@
                        VerticalContentAlignment="Center" Text="No boot asset selected"/>
               <ui:Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowsePte_Click"/>
             </Grid>
-            <ui:Button x:Name="TetherBootButton" Content="Tether Boot" Appearance="Secondary"
+            <ui:Button x:Name="TetherBootButton" Content="Boot Device" Appearance="Secondary"
                        Padding="22,10" Margin="0,18,0,0" HorizontalAlignment="Left" IsEnabled="False"
                        Click="TetherBoot_Click"/>
             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
@@ -258,20 +383,44 @@
         </ui:Card>
       </Grid>
 
+      <StackPanel x:Name="PostDowngradePanel" Visibility="Collapsed">
+        <TextBlock Text="POST-DOWNGRADE DASHBOARD" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+        <ui:Card>
+          <StackPanel>
+            <TextBlock Text="Downgrade output and live verification" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock x:Name="PostDowngradeSummaryText" Style="{StaticResource Text.Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+            <Border Margin="0,14,0,0" Padding="12" CornerRadius="6"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+              <TextBlock x:Name="PostVerificationText" Style="{StaticResource Text.Caption}" TextWrapping="Wrap"/>
+            </Border>
+            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+              <ui:Button Content="Boot Device" Appearance="Primary" Padding="20,9" Click="PostBootDevice_Click"/>
+              <ui:Button x:Name="VerifyPostDowngradeButton" Content="Verify Firmware &amp; ProductType" Margin="8,0,0,0"
+                         Click="VerifyPostDowngrade_Click"/>
+              <ui:Button Content="Open Session Folder" Appearance="Transparent" Margin="8,0,0,0"
+                         Click="OpenCompletedSession_Click"/>
+            </StackPanel>
+          </StackPanel>
+        </ui:Card>
+      </StackPanel>
+
       <TextBlock Text="DIAGNOSTICS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
         <TextBox x:Name="DiagnosticsBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                 MinHeight="100" MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                 MinHeight="100" MaxHeight="220" VerticalScrollBarVisibility="Auto"
                  BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
-                 FontSize="11.5" Text="Run diagnostics to check administrator rights, disk space, exact ProductType, device mode, and packaged components."/>
+                 FontSize="11.5" Text="Run diagnostics to check administrator rights, disk space, exact ProductType, device mode, driver state, and packaged components."/>
       </ui:Card>
 
-      <TextBlock Text="DARKSWORD LOG" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <TextBlock Text="TECHNICAL DETAILS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
-        <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                 MinHeight="150" MaxHeight="280" VerticalScrollBarVisibility="Auto"
-                 BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
-                 FontSize="11.5"/>
+        <Expander Header="Expand DarkSword log" IsExpanded="False">
+          <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                   MinHeight="170" MaxHeight="360" VerticalScrollBarVisibility="Auto"
+                   BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
+                   FontSize="11.5"/>
+        </Expander>
       </ui:Card>
     </StackPanel>
   </ScrollViewer>
