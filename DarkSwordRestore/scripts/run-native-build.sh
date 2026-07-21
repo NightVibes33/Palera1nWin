@@ -79,6 +79,30 @@ if old_openra1n not in text:
     raise SystemExit("Could not locate the openra1n packaging block")
 text = text.replace(old_openra1n, new_openra1n, 1)
 
+# GitHub's MSYS2 root can be rendered as either /mingw64/bin or as a full
+# runner path ending in /mingw64/bin. Match the segment anywhere in the ldd
+# path so every transitive runtime DLL is copied into the portable package.
+old_dependency_filter = "awk '$3 ~ /^\\/mingw64\\/bin\\// { print $3 }'"
+new_dependency_filter = "awk '$3 ~ /\\/mingw64\\/bin\\// { print $3 }'"
+if old_dependency_filter not in text:
+    raise SystemExit("Could not locate the MinGW dependency filter")
+text = text.replace(old_dependency_filter, new_dependency_filter, 1)
+
+# Fail the native build before packaging if the custom turdus transport DLL
+# was not collected. The smoke test will validate the complete clean-PATH set.
+manifest_marker = '# Record exact inputs and output hashes.'
+runtime_check = '''# Require the custom turdus transport runtime in the portable stage.
+if [[ ! -s "$STAGE/libirecovery-1.0.dll" ]]; then
+  echo "libirecovery-1.0.dll was not collected into the native stage" >&2
+  exit 6
+fi
+
+'''
+if runtime_check.strip() not in text:
+    if manifest_marker not in text:
+        raise SystemExit("Could not locate the native runtime verification point")
+    text = text.replace(manifest_marker, runtime_check + manifest_marker, 1)
+
 path.write_text(text, encoding="utf-8", newline="\n")
 PY
 
