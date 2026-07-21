@@ -27,11 +27,12 @@ set -x
 export PATH="/mingw64/bin:/usr/bin:$PATH"
 export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig:/mingw64/share/pkgconfig"
 
-# Build a Windows DLL that retains MinGW's normal Windows ABI/threading while
-# routing only libirecovery's USB operations through libusb/libusbK. The stock
-# Windows backend speaks to Apple's SetupAPI driver and cannot open the DFU and
-# Pongo devices after DarkSword assigns libusbK.
-git clone --depth 1 https://github.com/libimobiledevice/libirecovery.git "$WORK_ROOT/source"
+# Build the turdus-compatible libirecovery API while retaining MinGW's normal
+# Windows ABI/threading and routing USB operations through libusb/libusbK. This
+# fork provides the Pongo upload/control helpers consumed by turdus merula.
+git clone --depth 1 --branch sephaxx \
+  https://github.com/turdus-m3rula/libirecovery.git \
+  "$WORK_ROOT/source"
 
 python - "$WORK_ROOT/source" <<'PY'
 from __future__ import annotations
@@ -57,15 +58,15 @@ configure_text = configure_text.replace(
 configure.write_text(configure_text, encoding="utf-8")
 
 header_text = header.read_text(encoding="utf-8")
-if "IRECV_K_PONGO_MODE" not in header_text:
-    header_text = header_text.replace(
-        "IRECV_K_PORT_DFU_MODE     = 0xf014",
-        "IRECV_K_PORT_DFU_MODE     = 0xf014,\n\tIRECV_K_PONGO_MODE       = 0x4141",
-        1,
-    )
-if "IRECV_K_PONGO_MODE" not in header_text:
-    raise SystemExit("Could not add the Pongo product identifier")
-header.write_text(header_text, encoding="utf-8")
+required_api = (
+    "IRECV_K_PONGO_MODE",
+    "irecv_send_pongo",
+    "irecv_usb_control_transfer_no_timeout_retval",
+    "irecv_pongo_send_buffer",
+)
+missing = [symbol for symbol in required_api if symbol not in header_text]
+if missing:
+    raise SystemExit(f"The turdus libirecovery API is incomplete: {missing}")
 
 text = source.read_text(encoding="utf-8")
 replacements = {
@@ -81,7 +82,8 @@ for old, new in replacements.items():
         text = text.replace(old, new)
 
 # Include PongoOS in every known-mode list or predicate used by the libusb
-# enumeration and interface-selection paths.
+# enumeration and interface-selection paths. The turdus fork already carries
+# most of these checks; the replacements are intentionally idempotent.
 text = text.replace(
     "IRECV_K_PORT_DFU_MODE, KIS_PRODUCT_ID",
     "IRECV_K_PORT_DFU_MODE, IRECV_K_PONGO_MODE, KIS_PRODUCT_ID",
@@ -94,8 +96,6 @@ text = text.replace(
     "client->mode == IRECV_K_PORT_DFU_MODE || client->mode == IRECV_K_WTF_MODE",
     "client->mode == IRECV_K_PORT_DFU_MODE || client->mode == IRECV_K_PONGO_MODE || client->mode == IRECV_K_WTF_MODE",
 )
-
-# Catch vertically formatted predicates without altering already patched ones.
 text = re.sub(
     r"(IRECV_K_PORT_DFU_MODE\s*\|\|\s*\n)(?!\s*[^\n]*IRECV_K_PONGO_MODE)",
     r"\1\t\t\t\tusb_descriptor.idProduct == IRECV_K_PONGO_MODE ||\n",
@@ -113,6 +113,9 @@ if "IRECV_FORCE_LIBUSB" not in text or "IRECV_K_PONGO_MODE" not in text:
     raise SystemExit("The libusb/Pongo source patch did not apply")
 if "bzero(&transfer" in text:
     raise SystemExit("The MinGW bzero compatibility patch did not apply")
+for symbol in required_api[1:]:
+    if symbol not in text:
+        raise SystemExit(f"Missing turdus Pongo implementation: {symbol}")
 source.write_text(text, encoding="utf-8")
 PY
 
@@ -127,7 +130,13 @@ make install
 popd
 
 # Confirm the installed public API and DLL are the DarkSword libusb build.
-grep -q 'IRECV_K_PONGO_MODE' /mingw64/include/libirecovery.h
+for symbol in \
+  IRECV_K_PONGO_MODE \
+  irecv_send_pongo \
+  irecv_usb_control_transfer_no_timeout_retval \
+  irecv_pongo_send_buffer; do
+  grep -q "$symbol" /mingw64/include/libirecovery.h
+done
 DLL_PATH="$(find /mingw64/bin -maxdepth 1 -type f -iname 'libirecovery-1.0*.dll' -print -quit)"
 [[ -n "$DLL_PATH" && -s "$DLL_PATH" ]]
 ldd "$DLL_PATH" | tee "$LOG_ROOT/libirecovery-libusb-dependencies.txt"
@@ -152,6 +161,8 @@ fi
 mkdir -p /mingw64/share/darksword
 {
   echo "commit=$(git -C "$WORK_ROOT/source" rev-parse HEAD)"
+  echo "repository=turdus-m3rula/libirecovery"
+  echo "branch=sephaxx"
   echo "dll=$DLL_PATH"
   echo "backend=libusb"
   echo "pongo-pid=0x4141"
@@ -159,4 +170,4 @@ mkdir -p /mingw64/share/darksword
 } > /mingw64/share/darksword/libirecovery-libusb.txt
 
 trap - ERR
-echo "DarkSword libirecovery libusbK backend built successfully."
+echo "DarkSword turdus libirecovery libusbK backend built successfully."
