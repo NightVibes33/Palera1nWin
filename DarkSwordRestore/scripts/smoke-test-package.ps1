@@ -14,6 +14,8 @@ $required = @(
     "openra1n-core.exe",
     "darksword-pongo.exe",
     "wdi-simple.exe",
+    "libusb-1.0.dll",
+    "native-build-manifest.txt",
     "resources\sep_racer.bin",
     "resources\kpf.bin"
 )
@@ -22,11 +24,6 @@ foreach ($relative in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Missing packaged component: $relative"
     }
-}
-
-$irecovery = Get-ChildItem $toolchain -Filter "libirecovery-1.0*.dll" -File | Select-Object -First 1
-if (-not $irecovery) {
-    throw "The packaged libusb-backed libirecovery DLL is missing."
 }
 
 function Invoke-CapturedProcess {
@@ -74,4 +71,4 @@ if ($pongo.ExitCode -ne 1) {
 }
 
 Write-Host "Package smoke test passed."
-Write-Host "libirecovery: $($irecovery.Name)"
+Write-Host "turdus libirecovery transport: statically linked"
