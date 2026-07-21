@@ -2,8 +2,6 @@ name: DarkSword Restore Windows
 
 on:
   push:
-    branches:
-      - darksword-restore
     tags:
       - darksword-v*
   pull_request:
@@ -23,15 +21,14 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  build-windows:
+  managed:
+    name: Build Windows app
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 25
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -41,18 +38,55 @@ jobs:
       - name: Restore managed dependencies
         shell: pwsh
         run: |
-          dotnet restore DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj --runtime win-x64
+          dotnet restore DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -r win-x64 `
+            -p:SelfContained=true
           dotnet restore DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj
 
-      - name: Build managed projects
+      - name: Build and test managed projects
         shell: pwsh
         run: |
-          dotnet build DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj -c Release --no-restore
-          dotnet build DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj -c Release --no-restore
+          dotnet build DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            --no-restore
+          dotnet test DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj `
+            -c Release `
+            --no-restore
 
-      - name: Run managed tests
+      - name: Publish self-contained Windows app
         shell: pwsh
-        run: dotnet test DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj -c Release --no-build
+        run: |
+          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            --no-restore `
+            -p:PublishSingleFile=false `
+            -o DarkSwordRestore/build/publish
+          if (-not (Test-Path DarkSwordRestore/build/publish/DarkSwordRestore.exe -PathType Leaf)) {
+            throw 'DarkSwordRestore.exe was not published.'
+          }
+
+      - name: Upload managed publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-managed-publish
+          path: DarkSwordRestore/build/publish/**
+          if-no-files-found: error
+          retention-days: 7
+
+  native:
+    name: Build native downgrade toolchain
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up MSYS2 MinGW64
         uses: msys2/setup-msys2@v2
@@ -94,6 +128,34 @@ jobs:
         shell: msys2 {0}
         run: bash DarkSwordRestore/scripts/run-native-build.sh
 
+      - name: Verify native stage
+        shell: pwsh
+        run: |
+          $root = 'DarkSwordRestore/build/native-stage'
+          $required = @(
+            'openra1n.exe',
+            'openra1n-core.exe',
+            'turdus_merula.exe',
+            'darksword-pongo.exe',
+            'wdi-simple.exe',
+            'libusb-1.0.dll',
+            'resources/sep_racer.bin',
+            'resources/kpf.bin'
+          )
+          foreach ($item in $required) {
+            $path = Join-Path $root $item
+            if (-not (Test-Path $path -PathType Leaf)) { throw "Missing native component: $item" }
+            if ((Get-Item $path).Length -eq 0) { throw "Empty native component: $item" }
+          }
+
+      - name: Upload native stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-native-stage
+          path: DarkSwordRestore/build/native-stage/**
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload native build logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,45 +168,48 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish self-contained Windows app
-        shell: pwsh
-        run: |
-          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -o DarkSwordRestore/build/publish
+  package:
+    name: Package and smoke-test
+    needs: [managed, native]
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download managed publish
+        uses: actions/download-artifact@v4
+        with:
+          name: DarkSword-managed-publish
+          path: DarkSwordRestore/build/publish
+
+      - name: Download native stage
+        uses: actions/download-artifact@v4
+        with:
+          name: DarkSword-native-stage
+          path: DarkSwordRestore/build/native-stage
 
       - name: Package complete portable release
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}"
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $version = '${{ github.ref_name }}'
           }
           else {
-            $version = "build-${{ github.run_number }}"
+            $version = 'build-${{ github.run_number }}'
           }
           ./DarkSwordRestore/scripts/package-release.ps1 `
-            -PublishDirectory "DarkSwordRestore/build/publish" `
-            -NativeDirectory "DarkSwordRestore/build/native-stage" `
-            -OutputDirectory "DarkSwordRestore/build/release" `
+            -PublishDirectory 'DarkSwordRestore/build/publish' `
+            -NativeDirectory 'DarkSwordRestore/build/native-stage' `
+            -OutputDirectory 'DarkSwordRestore/build/release' `
             -Version $version
-
-      - name: Upload Windows package
-        uses: actions/upload-artifact@v4
-        with:
-          name: DarkSword-Restore-win-x64
-          path: |
-            DarkSwordRestore/build/release/*.zip
-            DarkSwordRestore/build/release/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
 
       - name: Smoke-test packaged executables
         shell: pwsh
         run: |
           ./DarkSwordRestore/scripts/smoke-test-package.ps1 `
-            -PackageRoot "DarkSwordRestore/build/release/DarkSword-Restore-win-x64"
+            -PackageRoot 'DarkSwordRestore/build/release/DarkSword-Restore-win-x64'
 
       - name: Upload smoke-test logs
         if: always()
@@ -154,6 +219,16 @@ jobs:
           path: DarkSwordRestore/build/release/DarkSword-Restore-win-x64/smoke-logs/**
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload tested Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-Restore-win-x64
+          path: |
+            DarkSwordRestore/build/release/*.zip
+            DarkSwordRestore/build/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish tagged GitHub release
         if: startsWith(github.ref, 'refs/tags/darksword-v')
