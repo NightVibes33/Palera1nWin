@@ -12,7 +12,8 @@ New-Item -ItemType Directory -Force $logDirectory | Out-Null
 "DarkSword deterministic package smoke test" | Set-Content $statusLog -Encoding UTF8
 
 function Write-Status([string]$Message) {
-    $Message | Tee-Object -FilePath $statusLog -Append
+    Add-Content -LiteralPath $statusLog -Value $Message -Encoding UTF8
+    Write-Host $Message
 }
 
 function Assert-File([string]$RelativePath, [long]$MinimumSize = 1) {
