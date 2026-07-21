@@ -18,10 +18,14 @@ concurrency:
   group: darksword-restore-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
 jobs:
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Check out source
@@ -50,7 +54,7 @@ jobs:
         shell: pwsh
         run: dotnet test DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj -c Release --no-build
 
-      - name: Set up MSYS2 native toolchain
+      - name: Set up MSYS2 MinGW64
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -58,13 +62,12 @@ jobs:
           install: >-
             base-devel
             git
-            make
             autoconf
             automake-wrapper
             libtool
+            make
             pkgconf
             python
-            vim
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-libusb
@@ -72,136 +75,28 @@ jobs:
             mingw-w64-x86_64-curl
             mingw-w64-x86_64-zlib
             mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-readline
+            mingw-w64-x86_64-libplist
+            mingw-w64-x86_64-libimobiledevice-glue
+            mingw-w64-x86_64-libusbmuxd
+            mingw-w64-x86_64-libimobiledevice
+            mingw-w64-x86_64-libirecovery
             mingw-w64-x86_64-zstd
             mingw-w64-x86_64-xz
             mingw-w64-x86_64-bzip2
 
-      - name: Download libirecovery Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libirecovery
-          workflow: build.yml
-          name: libirecovery-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
-      - name: Download libplist Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libplist
-          workflow: build.yml
-          name: libplist-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
-      - name: Download libusbmuxd Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libusbmuxd
-          workflow: build.yml
-          name: libusbmuxd-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
-      - name: Download libimobiledevice-glue Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libimobiledevice-glue
-          workflow: build.yml
-          name: libimobiledevice-glue-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
-      - name: Download libimobiledevice Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libimobiledevice
-          workflow: build.yml
-          name: libimobiledevice-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
-      - name: Download libtatsu Windows dependency
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ github.token }}
-          repo: libimobiledevice/libtatsu
-          workflow: build.yml
-          name: libtatsu-latest_x86_64-mingw64
-          path: DarkSwordRestore/build/deps
-
       - name: Build native Windows toolchain
         shell: msys2 {0}
-        run: |
-          set -euxo pipefail
-          ROOT="$GITHUB_WORKSPACE/DarkSwordRestore"
-          BUILD="$ROOT/build/native"
-          STAGE="$ROOT/build/native-stage"
-          mkdir -p "$BUILD" "$STAGE/resources" "$ROOT/build/deps-extract"
+        run: bash DarkSwordRestore/scripts/build-native.sh
 
-          find "$ROOT/build/deps" -type f -name '*.tar' -print0 | while IFS= read -r -d '' archive; do
-            tar -C "$ROOT/build/deps-extract" -xf "$archive"
-          done
-          cp -rf "$ROOT/build/deps-extract"/* / || true
-
-          cd "$BUILD"
-          git clone --depth 1 --branch non-libgeneral https://github.com/turdus-m3rula/libfragmentzip.git
-          cd libfragmentzip
-          ./autogen.sh --prefix=/mingw64
-          make -j2
-          make install
-
-          cd "$BUILD"
-          git clone --branch sephaxx https://github.com/turdus-m3rula/idevicerestore_fork.git idevicerestore
-          cd idevicerestore
-          PKG_CONFIG_PATH=/mingw64/lib/pkgconfig ./autogen.sh --prefix=/mingw64 --with-turdusmerula --without-libhfsplus
-          make -j2
-          cp src/idevicerestore.exe "$STAGE/turdus_merula.exe"
-
-          python - <<'PY'
-          import os
-          import pathlib
-          import re
-
-          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
-          root = workspace / 'DarkSwordRestore' / 'build' / 'native' / 'idevicerestore' / 'src' / 'stuff'
-          output = workspace / 'DarkSwordRestore' / 'build' / 'native-stage' / 'resources'
-          output.mkdir(parents=True, exist_ok=True)
-          for source_name, symbol, output_name in [
-              ('sep_racer_bin.c', 'sep_racer_bin', 'sep_racer.bin'),
-              ('kpf_bin.c', 'kpf_bin', 'kpf.bin'),
-          ]:
-              text = (root / source_name).read_text(encoding='utf-8')
-              match = re.search(r'unsigned\s+char\s+' + re.escape(symbol) + r'\s*\[\s*\]\s*=\s*\{(.*?)\};', text, re.S)
-              if not match:
-                  raise SystemExit(f'Unable to extract {symbol} from {source_name}')
-              values = bytes(int(value, 16) for value in re.findall(r'0x([0-9a-fA-F]{1,2})', match.group(1)))
-              if not values:
-                  raise SystemExit(f'No bytes extracted for {symbol}')
-              (output / output_name).write_bytes(values)
-              print(f'extracted {output_name}: {len(values)} bytes')
-          PY
-
-          cd "$BUILD"
-          git clone --depth 1 https://github.com/mineek/openra1n.git
-          cd openra1n
-          make LIBUSB=1
-          cp openra1n.exe "$STAGE/openra1n.exe"
-
-          gcc -std=c11 -O2 -Wall -Wextra \
-            $(pkg-config --cflags libusb-1.0) \
-            "$ROOT/native/pongo-bridge/pongo_bridge.c" \
-            -o "$STAGE/darksword-pongo.exe" \
-            $(pkg-config --libs libusb-1.0)
-
-          for pass in 1 2 3; do
-            for binary in "$STAGE"/*.exe "$STAGE"/*.dll; do
-              test -f "$binary" || continue
-              ldd "$binary" 2>/dev/null | awk '$3 ~ /^\/mingw64\/bin\// { print $3 }' | while read -r dependency; do
-                cp -n "$dependency" "$STAGE/" || true
-              done
-            done
-          done
+      - name: Upload native build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-native-build-log-${{ github.run_number }}
+          path: DarkSwordRestore/build/native-build.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publish self-contained Windows app
         shell: pwsh
@@ -213,71 +108,41 @@ jobs:
             --no-restore `
             -o DarkSwordRestore/build/publish
 
-      - name: Assemble portable release
+      - name: Package complete portable release
         shell: pwsh
         run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'DarkSwordRestore'
-          $package = Join-Path $root 'build/package'
-          $toolchain = Join-Path $package 'toolchain'
-          New-Item -ItemType Directory -Force $package, $toolchain | Out-Null
-          Copy-Item (Join-Path $root 'build/publish/*') $package -Recurse -Force
-          Copy-Item (Join-Path $root 'build/native-stage/*') $toolchain -Recurse -Force
-
-          $wdi = Get-ChildItem $env:GITHUB_WORKSPACE -Recurse -File -Filter 'wdi-simple.exe' |
-            Where-Object { $_.FullName -notlike '*DarkSwordRestore\build\package*' } |
-            Select-Object -First 1
-          if (-not $wdi) { throw 'Bundled wdi-simple.exe was not found in Palera1nWin.' }
-          Copy-Item $wdi.FullName (Join-Path $toolchain 'wdi-simple.exe') -Force
-
-          Copy-Item (Join-Path $root 'README.md') (Join-Path $package 'README.txt') -Force -ErrorAction SilentlyContinue
-          Set-Content (Join-Path $package 'BUILD.txt') @"
-          DarkSword Restore Windows x64
-          Commit: $env:GITHUB_SHA
-          Built: $(Get-Date -Format o)
-          Branch: $env:GITHUB_REF_NAME
-          "@
-
-      - name: Verify packaged toolchain
-        shell: pwsh
-        run: |
-          $toolchain = Join-Path $env:GITHUB_WORKSPACE 'DarkSwordRestore/build/package/toolchain'
-          $required = @(
-            'openra1n.exe',
-            'turdus_merula.exe',
-            'darksword-pongo.exe',
-            'wdi-simple.exe',
-            'resources/sep_racer.bin',
-            'resources/kpf.bin'
-          )
-          foreach ($item in $required) {
-            $path = Join-Path $toolchain $item
-            if (-not (Test-Path $path)) { throw "Missing packaged component: $item" }
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}"
           }
+          else {
+            $version = "build-${{ github.run_number }}"
+          }
+          ./DarkSwordRestore/scripts/package-release.ps1 `
+            -PublishDirectory "DarkSwordRestore/build/publish" `
+            -NativeDirectory "DarkSwordRestore/build/native-stage" `
+            -OutputDirectory "DarkSwordRestore/build/release" `
+            -Version $version
 
-          $help = & (Join-Path $toolchain 'turdus_merula.exe') --help 2>&1 | Out-String
+      - name: Smoke-test packaged executables
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'DarkSwordRestore/build/release/DarkSword-Restore-win-x64/toolchain'
+          $help = & (Join-Path $root 'turdus_merula.exe') --help 2>&1 | Out-String
           if ($help -notmatch 'get-shcblock' -or $help -notmatch 'get-pteblock') {
-            throw 'The packaged idevicerestore binary was not built with turdus merula support.'
+            throw 'turdus_merula.exe is missing the required turdus operations.'
+          }
+          & (Join-Path $root 'darksword-pongo.exe') 2>$null
+          if ($LASTEXITCODE -ne 1) {
+            throw "Unexpected darksword-pongo usage exit code: $LASTEXITCODE"
           }
 
-          & (Join-Path $toolchain 'darksword-pongo.exe') 2>$null
-          if ($LASTEXITCODE -ne 1) { throw "Unexpected darksword-pongo self-test exit code: $LASTEXITCODE" }
-
-      - name: Create release archive and hashes
-        shell: pwsh
-        run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'DarkSwordRestore/build'
-          $zip = Join-Path $root 'DarkSword-Restore-win-x64.zip'
-          Compress-Archive -Path (Join-Path $root 'package/*') -DestinationPath $zip -Force
-          $hash = Get-FileHash $zip -Algorithm SHA256
-          "$($hash.Hash.ToLower())  DarkSword-Restore-win-x64.zip" | Set-Content (Join-Path $root 'SHA256SUMS.txt')
-
-      - name: Upload Windows artifact
+      - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: DarkSword-Restore-win-x64
           path: |
-            DarkSwordRestore/build/DarkSword-Restore-win-x64.zip
-            DarkSwordRestore/build/SHA256SUMS.txt
+            DarkSwordRestore/build/release/*.zip
+            DarkSwordRestore/build/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -288,7 +153,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create $env:GITHUB_REF_NAME `
-            DarkSwordRestore/build/DarkSword-Restore-win-x64.zip `
-            DarkSwordRestore/build/SHA256SUMS.txt `
+            DarkSwordRestore/build/release/*.zip `
+            DarkSwordRestore/build/release/SHA256SUMS.txt `
             --title "DarkSword Restore $env:GITHUB_REF_NAME" `
             --generate-notes
