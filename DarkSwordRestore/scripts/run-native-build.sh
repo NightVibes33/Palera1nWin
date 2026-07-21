@@ -58,13 +58,16 @@ if "Patched libDER __unused compatibility for MinGW" not in text:
     text = text.replace(marker, compatibility_patch + marker, 1)
 
 # Preserve the original Windows openra1n binary as the core checkm8/PongoOS
-# engine. The user-facing executable then waits for that engine, assigns
-# libusbK to PongoOS PID 0x4141, and returns only after the new driver is ready.
+# engine. Its upstream Makefile names the output "openra1n" even though MinGW
+# creates "openra1n.exe", causing the strip step to fail. Correct BIN before
+# compiling, then build the user-facing driver-readiness wrapper.
 old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
 '''
-new_openra1n = '''make LIBUSB=1
+new_openra1n = '''sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
+grep -q '^BIN = openra1n.exe$' Makefile
+make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
