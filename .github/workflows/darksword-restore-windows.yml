@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: darksword-restore-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   DOTNET_NOLOGO: true
