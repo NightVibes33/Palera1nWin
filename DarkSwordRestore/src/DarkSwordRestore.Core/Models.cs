@@ -66,8 +66,10 @@ public sealed record IpswInspectionResult(
         .Select(DarkSwordDeviceCatalog.Find)
         .Any(device => device?.UsesA9SepBlocks == true);
 
+    // Retained for the existing orchestrator API. It now means the active
+    // Windows A9/A9X SHC/PTE restore path rather than only iPad 5.
     [JsonIgnore]
-    public bool SupportsIpad5 => SupportedProductTypes.Any(x => x is "iPad6,11" or "iPad6,12");
+    public bool SupportsIpad5 => SupportsWindowsA9Restore;
 
     public bool MatchesProductType(string? productType) =>
         productType is not null && SupportedProductTypes.Contains(productType, StringComparer.Ordinal);
