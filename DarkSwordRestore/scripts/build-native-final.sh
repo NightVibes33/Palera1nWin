@@ -53,6 +53,24 @@ git clone --depth 1 --branch sephaxx \
   https://github.com/turdus-m3rula/idevicerestore_fork.git \
   "$BUILD/idevicerestore"
 
+# The turdus branch conditionally declares cryptex1tss when reverse-proxy
+# support is detected, but restore.c accesses the field unconditionally.
+# Keep the field available on MinGW builds that use libimobiledevice's legacy
+# transport. iOS 15 does not use Cryptex1, but the source must remain coherent.
+python - "$BUILD/idevicerestore/src/restore.h" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "#ifdef HAVE_REVERSE_PROXY\n\tplist_t cryptex1tss;\n#endif"
+replacement = "\tplist_t cryptex1tss;"
+if needle not in text:
+    raise SystemExit("Expected conditional cryptex1tss declaration was not found")
+path.write_text(text.replace(needle, replacement, 1), encoding="utf-8", newline="\n")
+print("Patched restore_client_t cryptex1tss compatibility field")
+PY
+
 # Download the official module archive linked by sep.lol and verify its hash.
 RESOURCE_ARCHIVE="$BUILD/resource.tar.zst"
 RESOURCE_UNPACK="$BUILD/resource-unpack"
