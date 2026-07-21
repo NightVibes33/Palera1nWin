@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DarkSwordRestore.Core", "src\DarkSwordRestore.Core\DarkSwordRestore.Core.csproj", "{702AD1A4-0EC8-42F0-BF13-C52BFFFE205F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DarkSwordRestore.App", "src\DarkSwordRestore.App\DarkSwordRestore.App.csproj", "{3C3173EC-91DA-4CBA-B188-12A66BEAE2D3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DarkSwordRestore.SelfTest", "tests\DarkSwordRestore.SelfTest\DarkSwordRestore.SelfTest.csproj", "{A4FB6173-8910-433C-9EF6-1CBDF891CB0A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{702AD1A4-0EC8-42F0-BF13-C52BFFFE205F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{702AD1A4-0EC8-42F0-BF13-C52BFFFE205F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{702AD1A4-0EC8-42F0-BF13-C52BFFFE205F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{702AD1A4-0EC8-42F0-BF13-C52BFFFE205F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C3173EC-91DA-4CBA-B188-12A66BEAE2D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C3173EC-91DA-4CBA-B188-12A66BEAE2D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C3173EC-91DA-4CBA-B188-12A66BEAE2D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C3173EC-91DA-4CBA-B188-12A66BEAE2D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4FB6173-8910-433C-9EF6-1CBDF891CB0A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A4FB6173-8910-433C-9EF6-1CBDF891CB0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A4FB6173-8910-433C-9EF6-1CBDF891CB0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4FB6173-8910-433C-9EF6-1CBDF891CB0A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
