@@ -68,6 +68,9 @@ jobs:
             make
             pkgconf
             python
+            curl
+            zstd
+            vim
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-libusb
@@ -87,7 +90,7 @@ jobs:
 
       - name: Build native Windows toolchain
         shell: msys2 {0}
-        run: bash DarkSwordRestore/scripts/build-native.sh
+        run: bash DarkSwordRestore/scripts/build-native-final.sh
 
       - name: Upload native build log
         if: always()
