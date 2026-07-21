@@ -1,0 +1,54 @@
+name: DarkSword Publish Debug
+
+on:
+  push:
+    branches:
+      - darksword-restore
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: darksword-publish-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-debug:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Show project properties
+        shell: pwsh
+        run: |
+          dotnet --info
+          Get-Content DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj
+      - name: Restore win-x64
+        shell: pwsh
+        run: |
+          dotnet restore DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -r win-x64 `
+            -p:SelfContained=true `
+            -v:minimal
+      - name: Publish win-x64
+        shell: pwsh
+        run: |
+          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            --no-restore `
+            -p:PublishSingleFile=false `
+            -o DarkSwordRestore/build/publish `
+            -v:normal
+      - name: Verify publish output
+        shell: pwsh
+        run: |
+          Get-ChildItem DarkSwordRestore/build/publish -Recurse
+          if (-not (Test-Path DarkSwordRestore/build/publish/DarkSwordRestore.exe)) {
+            throw 'DarkSwordRestore.exe was not published.'
+          }
