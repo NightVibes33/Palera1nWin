@@ -36,11 +36,15 @@ jobs:
 
       - name: Restore managed dependencies
         shell: pwsh
-        run: dotnet restore DarkSwordRestore/DarkSwordRestore.slnx
+        run: |
+          dotnet restore DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj --runtime win-x64
+          dotnet restore DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj
 
-      - name: Build managed solution
+      - name: Build managed projects
         shell: pwsh
-        run: dotnet build DarkSwordRestore/DarkSwordRestore.slnx -c Release --no-restore
+        run: |
+          dotnet build DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj -c Release --no-restore
+          dotnet build DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj -c Release --no-restore
 
       - name: Run managed tests
         shell: pwsh
@@ -155,9 +159,13 @@ jobs:
           cp src/idevicerestore.exe "$STAGE/turdus_merula.exe"
 
           python - <<'PY'
-          import pathlib, re
-          root = pathlib.Path(r'''${{ github.workspace }}''') / 'DarkSwordRestore' / 'build' / 'native' / 'idevicerestore' / 'src' / 'stuff'
-          output = pathlib.Path(r'''${{ github.workspace }}''') / 'DarkSwordRestore' / 'build' / 'native-stage' / 'resources'
+          import os
+          import pathlib
+          import re
+
+          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          root = workspace / 'DarkSwordRestore' / 'build' / 'native' / 'idevicerestore' / 'src' / 'stuff'
+          output = workspace / 'DarkSwordRestore' / 'build' / 'native-stage' / 'resources'
           output.mkdir(parents=True, exist_ok=True)
           for source_name, symbol, output_name in [
               ('sep_racer_bin.c', 'sep_racer_bin', 'sep_racer.bin'),
@@ -202,7 +210,7 @@ jobs:
             -c Release `
             -r win-x64 `
             --self-contained true `
-            --no-build `
+            --no-restore `
             -o DarkSwordRestore/build/publish
 
       - name: Assemble portable release
