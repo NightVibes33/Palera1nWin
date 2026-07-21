@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - darksword-publish-debug
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
