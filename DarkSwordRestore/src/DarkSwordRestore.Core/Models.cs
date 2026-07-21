@@ -62,6 +62,11 @@ public sealed record IpswInspectionResult(
     public bool SupportsDarkSword => SupportedProductTypes.Any(DarkSwordDeviceCatalog.IsSupported);
 
     [JsonIgnore]
+    public bool SupportsWindowsA9Restore => SupportedProductTypes
+        .Select(DarkSwordDeviceCatalog.Find)
+        .Any(device => device?.UsesA9SepBlocks == true);
+
+    [JsonIgnore]
     public bool SupportsIpad5 => SupportedProductTypes.Any(x => x is "iPad6,11" or "iPad6,12");
 
     public bool MatchesProductType(string? productType) =>
