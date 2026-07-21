@@ -22,31 +22,33 @@ env:
 
 jobs:
   managed:
-    name: Build Windows app
+    name: Build unified Palera1nWin app
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up .NET 8
+      - name: Set up .NET 10 and .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            10.0.x
+            8.0.x
 
       - name: Restore managed dependencies
         shell: pwsh
         run: |
-          dotnet restore DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+          dotnet restore src/Palera1nWin.App/Palera1nWin.App.csproj `
             -r win-x64 `
             -p:SelfContained=true
           dotnet restore DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj
 
-      - name: Build and test managed projects
+      - name: Build unified app and test restore core
         shell: pwsh
         run: |
-          dotnet build DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+          dotnet build src/Palera1nWin.App/Palera1nWin.App.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
@@ -58,15 +60,15 @@ jobs:
       - name: Publish self-contained Windows app
         shell: pwsh
         run: |
-          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+          dotnet publish src/Palera1nWin.App/Palera1nWin.App.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
             --no-restore `
             -p:PublishSingleFile=false `
             -o DarkSwordRestore/build/publish
-          if (-not (Test-Path DarkSwordRestore/build/publish/DarkSwordRestore.exe -PathType Leaf)) {
-            throw 'DarkSwordRestore.exe was not published.'
+          if (-not (Test-Path DarkSwordRestore/build/publish/Palera1nWin.exe -PathType Leaf)) {
+            throw 'Palera1nWin.exe was not published.'
           }
 
       - name: Upload managed publish
@@ -169,7 +171,7 @@ jobs:
           retention-days: 14
 
   package:
-    name: Package and smoke-test
+    name: Package and smoke-test unified app
     needs: [managed, native]
     runs-on: windows-2022
     timeout-minutes: 20
@@ -239,5 +241,5 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             DarkSwordRestore/build/release/*.zip `
             DarkSwordRestore/build/release/SHA256SUMS.txt `
-            --title "DarkSword Restore $env:GITHUB_REF_NAME" `
+            --title "Palera1nWin DarkSword $env:GITHUB_REF_NAME" `
             --generate-notes
