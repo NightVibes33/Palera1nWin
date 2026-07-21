@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${GITHUB_WORKSPACE:?}/DarkSwordRestore"
-REPO_ROOT="${GITHUB_WORKSPACE:?}"
+WORKSPACE_UNIX="$(cygpath -u "${GITHUB_WORKSPACE:?}")"
+ROOT="$WORKSPACE_UNIX/DarkSwordRestore"
+REPO_ROOT="$WORKSPACE_UNIX"
 BUILD="$ROOT/build/native"
 STAGE="$ROOT/build/native-stage"
 LOG="$ROOT/build/native-build.log"
