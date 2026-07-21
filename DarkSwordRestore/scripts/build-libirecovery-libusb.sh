@@ -133,12 +133,29 @@ DLL_PATH="$(find /mingw64/bin -maxdepth 1 -type f -iname 'libirecovery-1.0*.dll'
 ldd "$DLL_PATH" | tee "$LOG_ROOT/libirecovery-libusb-dependencies.txt"
 ldd "$DLL_PATH" | grep -qi 'libusb-1.0'
 
+# Export a tiny compatibility header into subsequent GitHub Actions steps.
+# Turdus' embedded Apple DER sources use __unused, which MinGW does not define.
+COMPAT_HEADER="/mingw64/include/darksword-mingw-compat.h"
+cat > "$COMPAT_HEADER" <<'EOF'
+#ifndef DARKSWORD_MINGW_COMPAT_H
+#define DARKSWORD_MINGW_COMPAT_H
+#ifndef __unused
+#define __unused __attribute__((unused))
+#endif
+#endif
+EOF
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  GITHUB_ENV_UNIX="$(cygpath -u "$GITHUB_ENV")"
+  printf 'CPPFLAGS=-include /mingw64/include/darksword-mingw-compat.h\n' >> "$GITHUB_ENV_UNIX"
+fi
+
 mkdir -p /mingw64/share/darksword
 {
   echo "commit=$(git -C "$WORK_ROOT/source" rev-parse HEAD)"
   echo "dll=$DLL_PATH"
   echo "backend=libusb"
   echo "pongo-pid=0x4141"
+  echo "compat-header=$COMPAT_HEADER"
 } > /mingw64/share/darksword/libirecovery-libusb.txt
 
 trap - ERR
