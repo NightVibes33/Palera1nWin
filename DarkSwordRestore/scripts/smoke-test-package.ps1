@@ -94,6 +94,8 @@ try {
         "toolchain\openra1n-core.exe",
         "toolchain\darksword-pongo.exe",
         "toolchain\wdi-simple.exe",
+        "toolchain\ideviceinfo.exe",
+        "toolchain\irecovery.exe",
         "toolchain\libusb-1.0.dll"
     )
     foreach ($relative in $requiredPe) {
@@ -103,12 +105,33 @@ try {
     Assert-File "Palera1nWin.dll" 1024 | Out-Null
     Assert-File "DarkSwordRestore.Core.dll" 1024 | Out-Null
     Assert-BinaryString "Palera1nWin.dll" "DowngradeView"
+    Assert-BinaryString "Palera1nWin.dll" "FirmwareFeatures_Loaded"
+    Assert-BinaryString "Palera1nWin.dll" "api.ipsw.me"
     Assert-BinaryString "Palera1nWin.dll" "DarkSwordRestore.Core"
 
     Assert-File "toolchain\native-build-manifest.txt" 32 | Out-Null
     Assert-File "toolchain\resources\sep_racer.bin" 128 | Out-Null
     Assert-File "toolchain\resources\kpf.bin" 128 | Out-Null
     Assert-File "manifest.json" 32 | Out-Null
+
+    $identityHelp = Invoke-CapturedProcess `
+        -FilePath (Join-Path $toolchain "ideviceinfo.exe") `
+        -ArgumentList @("--help") `
+        -Name "ideviceinfo-help"
+    if (-not $identityHelp.Output.Contains("ProductType", [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $identityHelp.Output.Contains("key", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "ideviceinfo.exe did not expose its key-query interface. Exit code: $($identityHelp.ExitCode)"
+    }
+    Write-Status "OK ideviceinfo exact ProductType query support"
+
+    $recoveryHelp = Invoke-CapturedProcess `
+        -FilePath (Join-Path $toolchain "irecovery.exe") `
+        -ArgumentList @("--help") `
+        -Name "irecovery-help"
+    if (-not $recoveryHelp.Output.Contains("query", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "irecovery.exe did not expose recovery/DFU query support. Exit code: $($recoveryHelp.ExitCode)"
+    }
+    Write-Status "OK irecovery recovery/DFU identity support"
 
     $turdusHelp = Invoke-CapturedProcess `
         -FilePath (Join-Path $toolchain "turdus_merula.exe") `
