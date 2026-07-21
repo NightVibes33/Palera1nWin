@@ -16,11 +16,12 @@ public partial class DowngradeView
     {
         base.OnInitialized(e);
 
-        // Replace the original one-shot downloader with the resumable implementation
-        // before the user can click it, and wire the complete guided experience.
+        // Replace the original one-shot downloader before the user can click it.
+        // Dependency-backed experience services are deferred until Loaded because
+        // WPF raises OnInitialized while InitializeComponent is still running.
         DownloadFirmwareButton.Click -= DownloadFirmware_Click;
         DownloadFirmwareButton.Click += DownloadFirmwareSafe_Click;
-        WireDowngradeExperienceHooks();
+        Loaded += DeferredDowngradeExperience_Loaded;
     }
 
     private async void DownloadFirmwareSafe_Click(object sender, RoutedEventArgs e)
