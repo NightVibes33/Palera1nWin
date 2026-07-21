@@ -29,10 +29,7 @@ public sealed class SessionLogger : IDisposable
     public void Write(string level, string message)
     {
         var line = $"{DateTimeOffset.Now:O} [{level}] {message}";
-        lock (_gate)
-        {
-            _writer.WriteLine(line);
-        }
+        lock (_gate) _writer.WriteLine(line);
         LineWritten?.Invoke(this, line);
     }
 
@@ -66,59 +63,46 @@ public sealed class ProcessRunner
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        foreach (var argument in argumentList)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (var argument in argumentList) startInfo.ArgumentList.Add(argument);
         if (environment is not null)
-        {
-            foreach (var entry in environment)
-            {
-                startInfo.Environment[entry.Key] = entry.Value;
-            }
-        }
+            foreach (var entry in environment) startInfo.Environment[entry.Key] = entry.Value;
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var output = new StringBuilder();
         var error = new StringBuilder();
+        var outputClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var errorClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         process.OutputDataReceived += (_, e) =>
         {
-            if (e.Data is null) return;
-            output.AppendLine(e.Data);
+            if (e.Data is null) { outputClosed.TrySetResult(); return; }
+            lock (output) output.AppendLine(e.Data);
             _log.Info(e.Data);
         };
         process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is null) return;
-            error.AppendLine(e.Data);
+            if (e.Data is null) { errorClosed.TrySetResult(); return; }
+            lock (error) error.AppendLine(e.Data);
             _log.Warn(e.Data);
         };
 
         var stopwatch = Stopwatch.StartNew();
-        if (!process.Start())
-        {
-            throw new InvalidOperationException($"Could not start {fileName}.");
-        }
+        if (!process.Start()) throw new InvalidOperationException($"Could not start {fileName}.");
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         using var timeoutCts = timeout.HasValue ? new CancellationTokenSource(timeout.Value) : null;
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            timeoutCts?.Token ?? CancellationToken.None);
-
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts?.Token ?? CancellationToken.None);
         try
         {
             await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
-            await Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync()).ConfigureAwait(false);
+            await Task.WhenAll(outputClosed.Task, errorClosed.Task).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             TryKill(process);
             if (timeoutCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
-            {
                 throw new TimeoutException($"{Path.GetFileName(fileName)} exceeded {timeout}.");
-            }
             throw;
         }
         finally
@@ -133,11 +117,7 @@ public sealed class ProcessRunner
 
     private static void TryKill(Process process)
     {
-        try
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-        }
-        catch { }
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
     }
 }
 
@@ -145,11 +125,9 @@ public sealed class ToolchainLocator
 {
     public string Root { get; }
 
-    public ToolchainLocator(string? root = null)
-    {
-        Root = root ?? FindToolchainRoot();
-    }
+    public ToolchainLocator(string? root = null) => Root = root ?? FindToolchainRoot();
 
+    public string Gaster => Require("gaster.exe", "native/gaster.exe", "dist/native/gaster.exe");
     public string OpenRa1n => Require("openra1n.exe", "native/openra1n.exe", "dist/native/openra1n.exe");
     public string TurdusRestore => Require("turdus_merula.exe", "native/turdus_merula.exe", "dist/native/turdus_merula.exe");
     public string IRecovery => Require("irecovery.exe", "native/irecovery.exe", "dist/native/irecovery.exe");
@@ -159,7 +137,7 @@ public sealed class ToolchainLocator
 
     public IReadOnlyList<string> MissingRequiredTools()
     {
-        var names = new[] { "openra1n.exe", "turdus_merula.exe", "irecovery.exe", "wdi-simple.exe", "libusb-1.0.dll" };
+        var names = new[] { "gaster.exe", "openra1n.exe", "turdus_merula.exe", "irecovery.exe", "wdi-simple.exe", "libusb-1.0.dll" };
         return names.Where(name => Find(name, $"native/{name}", $"dist/native/{name}") is null).ToArray();
     }
 
@@ -178,13 +156,7 @@ public sealed class ToolchainLocator
 
     private static string FindToolchainRoot()
     {
-        var starts = new[]
-        {
-            AppContext.BaseDirectory,
-            Environment.CurrentDirectory,
-            Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory
-        };
-
+        var starts = new[] { AppContext.BaseDirectory, Environment.CurrentDirectory, Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory };
         foreach (var start in starts.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var directory = new DirectoryInfo(start);
@@ -207,8 +179,7 @@ public static class SessionStore
     public static async Task SaveAsync(RestoreSession session, CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(session.SessionDirectory);
-        var path = Path.Combine(session.SessionDirectory, "session.json");
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(session, Options), cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(session.SessionDirectory, "session.json"), JsonSerializer.Serialize(session, Options), cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<RestoreSession?> LoadAsync(string sessionDirectory, CancellationToken cancellationToken = default)
