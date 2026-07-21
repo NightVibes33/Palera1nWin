@@ -30,7 +30,8 @@ public sealed class IpswInspectorTests
             var result = await new IpswInspector().InspectAsync(path);
 
             Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
-            Assert.True(result.SupportsIpad5);
+            Assert.True(result.SupportsDarkSword);
+            Assert.True(result.SupportsWindowsA9Restore);
             Assert.Equal("15.4.1", result.ProductVersion);
             Assert.Equal("19E258", result.BuildVersion);
             Assert.NotEmpty(result.Sha256);
@@ -42,7 +43,42 @@ public sealed class IpswInspectorTests
     }
 
     [Fact]
-    public async Task RejectsWrongDeviceFirmware()
+    public async Task AcceptsA10Ios15IpswForDownloaderAndInspection()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"darksword-{Guid.NewGuid():N}.ipsw");
+        try
+        {
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                Write(archive, "BuildManifest.plist", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <plist version="1.0"><dict>
+                      <key>ProductVersion</key><string>15.8.4</string>
+                      <key>ProductBuildVersion</key><string>19H390</string>
+                      <key>SupportedProductTypes</key><array><string>iPhone9,3</string></array>
+                    </dict></plist>
+                    """);
+                Write(archive, "Restore.plist", "restore");
+                Write(archive, "Firmware/dfu/iBSS.test", "ibss");
+                Write(archive, "Firmware/dfu/iBEC.test", "ibec");
+                Write(archive, "Firmware/sep-firmware.test", "sep");
+            }
+
+            var result = await new IpswInspector().InspectAsync(path);
+
+            Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+            Assert.True(result.SupportsDarkSword);
+            Assert.False(result.SupportsWindowsA9Restore);
+            Assert.True(result.MatchesProductType("iPhone9,3"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsA11Firmware()
     {
         var path = Path.Combine(Path.GetTempPath(), $"darksword-{Guid.NewGuid():N}.ipsw");
         try
@@ -66,7 +102,7 @@ public sealed class IpswInspectorTests
             var result = await new IpswInspector().InspectAsync(path);
 
             Assert.False(result.IsValid);
-            Assert.Contains(result.Errors, error => error.Contains("iPad6,11", StringComparison.Ordinal));
+            Assert.Contains(result.Errors, error => error.Contains("A9 through A10X", StringComparison.Ordinal));
         }
         finally
         {
