@@ -5,7 +5,10 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <!-- DarkSword installs the Apple DFU libusbK driver and therefore must
+             be elevated before any restore work begins. Prompt once at app
+             startup instead of attempting a hidden mid-workflow elevation. -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
