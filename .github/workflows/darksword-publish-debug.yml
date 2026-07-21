@@ -1,0 +1,53 @@
+name: DarkSword Publish Diagnostic
+
+on:
+  push:
+    branches:
+      - darksword-publish-debug
+
+permissions:
+  contents: read
+
+jobs:
+  publish-debug:
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Capture self-contained publish log
+        id: publish
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force DarkSwordRestore/build | Out-Null
+          $log = 'DarkSwordRestore/build/publish-diagnostic.log'
+          dotnet publish DarkSwordRestore/src/DarkSwordRestore.App/DarkSwordRestore.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -o DarkSwordRestore/build/publish `
+            -v diagnostic 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit 0
+
+      - name: Upload publish diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-publish-diagnostic
+          path: DarkSwordRestore/build/publish-diagnostic.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when publish failed
+        if: steps.publish.outputs.exit_code != '0'
+        shell: pwsh
+        run: throw "DarkSword publish failed with exit code ${{ steps.publish.outputs.exit_code }}"
