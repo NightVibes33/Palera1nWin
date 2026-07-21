@@ -93,6 +93,26 @@ if old_openra1n not in text:
     raise SystemExit("Could not locate the openra1n packaging block")
 text = text.replace(old_openra1n, new_openra1n, 1)
 
+# Package the native normal-mode and recovery/DFU identity tools used by the
+# exact-device IPSW downloader. Their dependencies are collected by the same
+# recursive ldd pass as the restore binaries.
+identity_marker = '# Collect all transitive MinGW runtime DLLs until the set stabilizes.'
+identity_patch = '''# Package exact-device identity tools.
+for identity_tool in ideviceinfo.exe irecovery.exe; do
+  identity_source="/mingw64/bin/$identity_tool"
+  if [[ ! -s "$identity_source" ]]; then
+    echo "Missing required identity tool: $identity_source" >&2
+    exit 8
+  fi
+  cp "$identity_source" "$STAGE/$identity_tool"
+done
+
+'''
+if identity_marker not in text:
+    raise SystemExit("Could not locate the native runtime dependency collection block")
+if "Package exact-device identity tools" not in text:
+    text = text.replace(identity_marker, identity_patch + identity_marker, 1)
+
 # GitHub's MSYS2 root can be rendered as either /mingw64/bin or as a full
 # runner path ending in /mingw64/bin. Match the segment anywhere in the ldd
 # path so every transitive runtime DLL is copied into the portable package.
