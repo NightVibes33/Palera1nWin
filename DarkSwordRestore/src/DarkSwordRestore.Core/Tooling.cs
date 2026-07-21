@@ -23,9 +23,17 @@ public sealed record ToolchainPaths(
     }
 
     public IReadOnlyList<string> MissingFiles() =>
-        new[] { OpenRa1n, IdeviceRestore, PongoBridge, WdiSimple }
-            .Where(path => !File.Exists(path))
-            .ToArray();
+        new[]
+        {
+            OpenRa1n,
+            IdeviceRestore,
+            PongoBridge,
+            WdiSimple,
+            Path.Combine(Root, "ideviceinfo.exe"),
+            Path.Combine(Root, "irecovery.exe")
+        }
+        .Where(path => !File.Exists(path))
+        .ToArray();
 }
 
 public sealed class ToolProcessRunner
@@ -96,14 +104,7 @@ public sealed class ToolProcessRunner
             }
         });
 
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 
         started.Stop();
         var result = new ToolResult(
@@ -157,7 +158,10 @@ public sealed class ToolProcessRunner
             {
                 if (!process.HasExited) process.Kill(entireProcessTree: true);
             }
-            catch { }
+            catch
+            {
+                // Best-effort cancellation of an elevated child process.
+            }
         });
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
