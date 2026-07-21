@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $toolchain = Join-Path $PackageRoot "toolchain"
+$releaseRoot = Split-Path -Parent $PackageRoot
 $logDirectory = Join-Path $PackageRoot "smoke-logs"
 $statusLog = Join-Path $logDirectory "smoke-status.txt"
 New-Item -ItemType Directory -Force $logDirectory | Out-Null
@@ -73,7 +74,6 @@ try {
     Assert-File "toolchain\resources\sep_racer.bin" 128 | Out-Null
     Assert-File "toolchain\resources\kpf.bin" 128 | Out-Null
     Assert-File "manifest.json" 32 | Out-Null
-    Assert-File "SHA256SUMS.txt" 32 | Out-Null
 
     Assert-BinaryString "toolchain\turdus_merula.exe" "get-shcblock"
     Assert-BinaryString "toolchain\turdus_merula.exe" "get-pteblock"
@@ -115,6 +115,26 @@ try {
         }
     }
     Write-Status "OK manifest verified $($manifest.Count) files"
+
+    $checksumPath = Join-Path $releaseRoot "SHA256SUMS.txt"
+    if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
+        throw "Release checksum file is missing."
+    }
+    $checksumLine = (Get-Content -LiteralPath $checksumPath | Select-Object -First 1).Trim()
+    if ($checksumLine -notmatch '^([0-9a-fA-F]{64})\s+(.+)$') {
+        throw "Release checksum file has an invalid format."
+    }
+    $expectedZipHash = $Matches[1].ToLowerInvariant()
+    $zipName = $Matches[2].Trim()
+    $zipPath = Join-Path $releaseRoot $zipName
+    if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+        throw "Release ZIP referenced by SHA256SUMS.txt is missing: $zipName"
+    }
+    $actualZipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualZipHash -ne $expectedZipHash) {
+        throw "Release ZIP SHA-256 mismatch."
+    }
+    Write-Status "OK release ZIP SHA-256 $actualZipHash"
     Write-Status "Package smoke test passed. Physical DFU/restore testing remains required."
 }
 catch {
