@@ -91,7 +91,7 @@ jobs:
 
       - name: Build native Windows toolchain
         shell: msys2 {0}
-        run: bash DarkSwordRestore/scripts/build-native-final.sh
+        run: bash DarkSwordRestore/scripts/run-native-build.sh
 
       - name: Upload native build logs
         if: always()
