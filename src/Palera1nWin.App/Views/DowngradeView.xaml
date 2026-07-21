@@ -1,0 +1,161 @@
+<UserControl x:Class="Palera1nWin.App.Views.DowngradeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <StackPanel Margin="28,20,28,32" MaxWidth="1040" HorizontalAlignment="Left">
+      <Grid>
+        <StackPanel>
+          <TextBlock Text="Downgrade" Style="{StaticResource Text.Title}"/>
+          <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
+                     Text="Restore an iPad 5th generation to a stock iOS 15 IPSW with the DarkSword tethered restore workflow."/>
+        </StackPanel>
+        <Border x:Name="DeviceModeBadge" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Style="{StaticResource Badge}" Background="#26343F52">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse x:Name="DeviceDot" Width="7" Height="7" Margin="0,0,7,0"
+                     VerticalAlignment="Center" Fill="{StaticResource Brush.TextTertiary}"/>
+            <TextBlock x:Name="DeviceModeLabel" Text="Disconnected" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <ui:InfoBar Margin="0,20,0,0" Severity="Warning" IsOpen="True" IsClosable="False"
+                  Title="This erases the iPad and produces a tethered installation"
+                  Message="Back up anything important. After a shutdown or reboot, use this page and the saved PTE block to boot iOS again."/>
+
+      <Grid Margin="0,20,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="2*"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <ui:Card Grid.Column="0" Margin="0,0,10,0">
+          <StackPanel>
+            <TextBlock Text="Firmware" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
+                       Text="Choose one untouched Apple IPSW for iPad6,11 or iPad6,12. iOS 15.x is the validated target."/>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="IpswPathBox" Grid.Column="0" IsReadOnly="True" MinHeight="34"
+                       VerticalContentAlignment="Center" Text="No IPSW selected"/>
+              <ui:Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Padding="16,7"
+                         Click="BrowseIpsw_Click"/>
+              <ui:Button x:Name="InspectIpswButton" Grid.Column="2" Content="Inspect" Margin="8,0,0,0"
+                         Padding="16,7" Appearance="Primary" Click="InspectIpsw_Click"/>
+            </Grid>
+            <Border Margin="0,14,0,0" Padding="12" CornerRadius="6"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+              <TextBlock x:Name="IpswSummaryText" Style="{StaticResource Text.Caption}"
+                         Text="Select an IPSW to verify its model, version, size, manifest, and SHA-256."/>
+            </Border>
+          </StackPanel>
+        </ui:Card>
+
+        <ui:Card Grid.Column="1" Margin="10,0,0,0">
+          <StackPanel>
+            <TextBlock Text="Readiness" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Text="DEVICE" Style="{StaticResource Text.Section}" Margin="0,16,0,4"/>
+            <TextBlock x:Name="DeviceDetailsText" Text="Connect iPad6,11 or iPad6,12"
+                       Style="{StaticResource Text.Caption}"/>
+            <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
+            <TextBlock Text="TOOLCHAIN" Style="{StaticResource Text.Section}"/>
+            <TextBlock x:Name="ToolchainStateText" Text="Checking" Style="{StaticResource Text.Body}"
+                       FontWeight="SemiBold" Margin="0,5,0,0"/>
+            <TextBlock x:Name="ToolchainDetailsText" Text="Validating packaged components"
+                       Style="{StaticResource Text.Caption}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+            <ui:Button Content="Run Diagnostics" Margin="0,16,0,0" HorizontalAlignment="Left"
+                       Click="RunDiagnostics_Click"/>
+          </StackPanel>
+        </ui:Card>
+      </Grid>
+
+      <TextBlock Text="RESTORE PROGRESS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <StackPanel>
+          <Grid>
+            <StackPanel>
+              <TextBlock x:Name="CurrentStageText" Text="Ready" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+              <TextBlock x:Name="CurrentDetailText" Text="Select and inspect an IPSW to begin"
+                         Style="{StaticResource Text.Caption}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <ui:Button x:Name="CancelButton" Content="Cancel" Appearance="Transparent"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" IsEnabled="False"
+                       Click="Cancel_Click"/>
+          </Grid>
+          <ProgressBar x:Name="OperationProgress" Minimum="0" Maximum="100" Height="8" Margin="0,14,0,0"/>
+        </StackPanel>
+      </ui:Card>
+
+      <Grid Margin="0,20,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="3*"/>
+          <ColumnDefinition Width="2*"/>
+        </Grid.ColumnDefinitions>
+
+        <ui:Card Grid.Column="0" Margin="0,0,10,0">
+          <StackPanel>
+            <TextBlock Text="Full downgrade" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
+                       Text="Generates the pre-restore SHC block, restores the IPSW, creates the permanent PTE block, and performs the first tether boot."/>
+            <CheckBox x:Name="EraseCheck" Content="I understand this completely erases the iPad"
+                      Margin="0,0,0,9" Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+            <CheckBox x:Name="TetherCheck" Content="I understand every cold boot requires this Windows app"
+                      Margin="0,0,0,9" Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+            <CheckBox x:Name="OwnershipCheck" Content="I own or am authorized to restore this device"
+                      Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+            <ui:Button x:Name="StartDowngradeButton" Content="Start Full Downgrade" Appearance="Primary"
+                       Padding="22,10" Margin="0,18,0,0" HorizontalAlignment="Left" IsEnabled="False"
+                       Click="StartDowngrade_Click"/>
+          </StackPanel>
+        </ui:Card>
+
+        <ui:Card Grid.Column="1" Margin="10,0,0,0">
+          <StackPanel>
+            <TextBlock Text="Tether boot" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
+                       Text="Use the PTE block saved by a completed downgrade session after the iPad shuts down or restarts."/>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="PtePathBox" Grid.Column="0" IsReadOnly="True" MinHeight="34"
+                       VerticalContentAlignment="Center" Text="No PTE block selected"/>
+              <ui:Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowsePte_Click"/>
+            </Grid>
+            <ui:Button x:Name="TetherBootButton" Content="Tether Boot" Appearance="Secondary"
+                       Padding="22,10" Margin="0,18,0,0" HorizontalAlignment="Left" IsEnabled="False"
+                       Click="TetherBoot_Click"/>
+            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+              <ui:Button Content="Sessions" Appearance="Transparent" Click="OpenSessions_Click"/>
+              <ui:Button Content="Logs" Appearance="Transparent" Margin="8,0,0,0" Click="OpenLogs_Click"/>
+            </StackPanel>
+          </StackPanel>
+        </ui:Card>
+      </Grid>
+
+      <TextBlock Text="DIAGNOSTICS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <TextBox x:Name="DiagnosticsBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                 MinHeight="100" MaxHeight="180" VerticalScrollBarVisibility="Auto"
+                 BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
+                 FontSize="11.5" Text="Run diagnostics to check administrator rights, disk space, device mode, and packaged components."/>
+      </ui:Card>
+
+      <TextBlock Text="DARKSWORD LOG" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                 MinHeight="150" MaxHeight="260" VerticalScrollBarVisibility="Auto"
+                 BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
+                 FontSize="11.5"/>
+      </ui:Card>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
