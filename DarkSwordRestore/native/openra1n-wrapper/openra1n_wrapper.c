@@ -1,7 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <process.h>
-#include <errno.h>
+#include <setupapi.h>
+#include <usbiodef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
@@ -9,26 +9,84 @@
 static int sibling_path(const wchar_t *name, wchar_t *output, size_t capacity)
 {
     DWORD length = GetModuleFileNameW(NULL, output, (DWORD)capacity);
-    if (length == 0 || length >= capacity) {
-        return 0;
-    }
+    if (length == 0 || length >= capacity) return 0;
 
     wchar_t *slash = wcsrchr(output, L'\\');
-    if (slash == NULL) {
-        slash = wcsrchr(output, L'/');
-    }
-    if (slash == NULL) {
-        return 0;
-    }
+    if (slash == NULL) slash = wcsrchr(output, L'/');
+    if (slash == NULL) return 0;
 
     slash[1] = L'\0';
-    size_t used = wcslen(output);
-    size_t needed = wcslen(name);
-    if (used + needed + 1 > capacity) {
-        return 0;
-    }
+    if (wcslen(output) + wcslen(name) + 1 > capacity) return 0;
     wcscat(output, name);
     return 1;
+}
+
+static int contains_case_insensitive(const wchar_t *text, const wchar_t *needle)
+{
+    size_t text_length = wcslen(text);
+    size_t needle_length = wcslen(needle);
+    if (needle_length == 0 || needle_length > text_length) return 0;
+
+    for (size_t offset = 0; offset + needle_length <= text_length; ++offset) {
+        if (_wcsnicmp(text + offset, needle, needle_length) == 0) return 1;
+    }
+    return 0;
+}
+
+static int pongo_is_present(void)
+{
+    HDEVINFO info = SetupDiGetClassDevsW(
+        &GUID_DEVINTERFACE_USB_DEVICE,
+        NULL,
+        NULL,
+        DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (info == INVALID_HANDLE_VALUE) return 0;
+
+    int found = 0;
+    for (DWORD index = 0; ; ++index) {
+        SP_DEVICE_INTERFACE_DATA interface_data;
+        ZeroMemory(&interface_data, sizeof(interface_data));
+        interface_data.cbSize = sizeof(interface_data);
+        if (!SetupDiEnumDeviceInterfaces(info, NULL, &GUID_DEVINTERFACE_USB_DEVICE, index, &interface_data)) {
+            break;
+        }
+
+        DWORD required = 0;
+        SetupDiGetDeviceInterfaceDetailW(info, &interface_data, NULL, 0, &required, NULL);
+        if (required == 0) continue;
+
+        PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail = malloc(required);
+        if (detail == NULL) break;
+        detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+        if (SetupDiGetDeviceInterfaceDetailW(info, &interface_data, detail, required, NULL, NULL)) {
+            if (contains_case_insensitive(detail->DevicePath, L"vid_05ac") &&
+                contains_case_insensitive(detail->DevicePath, L"pid_4141")) {
+                found = 1;
+                free(detail);
+                break;
+            }
+        }
+        free(detail);
+    }
+
+    SetupDiDestroyDeviceInfoList(info);
+    return found;
+}
+
+static wchar_t *build_command_line(int argc, wchar_t **argv, const wchar_t *core)
+{
+    size_t capacity = wcslen(core) + 4;
+    for (int index = 1; index < argc; ++index) capacity += wcslen(argv[index]) * 2 + 4;
+
+    wchar_t *command = calloc(capacity, sizeof(wchar_t));
+    if (command == NULL) return NULL;
+    swprintf(command, capacity, L"\"%ls\"", core);
+    for (int index = 1; index < argc; ++index) {
+        wcscat(command, L" \"");
+        wcscat(command, argv[index]);
+        wcscat(command, L"\"");
+    }
+    return command;
 }
 
 int wmain(int argc, wchar_t **argv)
@@ -38,35 +96,70 @@ int wmain(int argc, wchar_t **argv)
         fwprintf(stderr, L"[DarkSword] Could not resolve openra1n-core.exe.\n");
         return 90;
     }
-
     if (GetFileAttributesW(core) == INVALID_FILE_ATTRIBUTES) {
         fwprintf(stderr, L"[DarkSword] Missing %ls\n", core);
         return 91;
     }
 
-    wchar_t **core_argv = calloc((size_t)argc + 1, sizeof(wchar_t *));
-    if (core_argv == NULL) {
+    wchar_t *command = build_command_line(argc, argv, core);
+    if (command == NULL) {
         fwprintf(stderr, L"[DarkSword] Out of memory.\n");
         return 92;
     }
 
-    core_argv[0] = core;
-    for (int index = 1; index < argc; ++index) {
-        core_argv[index] = argv[index];
-    }
-    core_argv[argc] = NULL;
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    ZeroMemory(&startup, sizeof(startup));
+    ZeroMemory(&process, sizeof(process));
+    startup.cb = sizeof(startup);
 
-    fwprintf(stdout, L"[DarkSword] Starting Windows checkm8/PongoOS core. Driver ownership remains in the managed hardware pipeline.\n");
+    fwprintf(stdout, L"[DarkSword] Starting Windows checkm8/PongoOS core. USB drivers remain managed by the host application.\n");
     fflush(stdout);
 
-    /* Replace this wrapper process with the real core process. The managed host
-       now owns process lifetime, USB driver transitions, Pongo enumeration,
-       and bridge verification. No wdi-simple call is allowed in this wrapper. */
-    intptr_t result = _wspawnv(_P_OVERLAY, core, (const wchar_t * const *)core_argv);
-    free(core_argv);
+    if (!CreateProcessW(core, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) {
+        DWORD error = GetLastError();
+        free(command);
+        fwprintf(stderr, L"[DarkSword] Could not start openra1n-core.exe (error=%lu).\n", error);
+        return 93;
+    }
+    free(command);
 
-    fwprintf(stderr, L"[DarkSword] Could not start openra1n-core.exe (errno=%d, result=%lld).\n",
-             errno,
-             (long long)result);
-    return 93;
+    const DWORD timeout_ms = 120000;
+    DWORD elapsed = 0;
+    int pongo_seen = 0;
+    while (elapsed < timeout_ms) {
+        if (pongo_is_present()) {
+            pongo_seen = 1;
+            fwprintf(stdout, L"[DarkSword] PongoOS USB 05AC:4141 enumerated. Returning control to the managed driver/probe pipeline.\n");
+            fflush(stdout);
+            break;
+        }
+
+        DWORD wait = WaitForSingleObject(process.hProcess, 250);
+        if (wait == WAIT_OBJECT_0) break;
+        Sleep(250);
+        elapsed += 500;
+    }
+
+    DWORD exit_code = 1;
+    if (pongo_seen) {
+        Sleep(500);
+        if (WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT) {
+            TerminateProcess(process.hProcess, 0);
+            WaitForSingleObject(process.hProcess, 3000);
+        }
+        exit_code = 0;
+    } else if (WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) {
+        GetExitCodeProcess(process.hProcess, &exit_code);
+        fwprintf(stderr, L"[DarkSword] openra1n-core.exe exited before PongoOS (code=%lu).\n", exit_code);
+    } else {
+        fwprintf(stderr, L"[DarkSword] Timed out waiting for PongoOS USB 05AC:4141.\n");
+        TerminateProcess(process.hProcess, 94);
+        WaitForSingleObject(process.hProcess, 3000);
+        exit_code = 94;
+    }
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return (int)exit_code;
 }
