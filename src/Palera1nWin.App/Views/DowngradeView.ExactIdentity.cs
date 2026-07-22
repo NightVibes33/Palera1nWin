@@ -139,6 +139,20 @@ public partial class DowngradeView
     private async void ResumeIdentityBoundSession_Click(object sender, RoutedEventArgs e)
     {
         if (_recoveryCandidate is null) return;
+        try
+        {
+            _recoveryCandidate = RecoveryIntegrityValidator.ValidateAndNormalize(_recoveryCandidate);
+        }
+        catch (Exception exception)
+        {
+            AppendLog($"Recovery integrity validation blocked the session: {exception}");
+            ShowMessage(
+                "Recovery was blocked before any USB or native operation:\n\n" + exception.Message,
+                "Recovery artifact integrity failed",
+                MessageBoxImage.Error);
+            return;
+        }
+
         var receipt = LoadCurrentExactHardwareValidation();
         var session = _recoveryCandidate.Session;
         if (session.HasBoundIdentity)
