@@ -2,7 +2,9 @@
 using System.Windows;
 using System.Windows.Threading;
 using Palera1nWin.App.ViewModels;
+using Palera1nWin.Core.Security;
 using Palera1nWin.Core.Settings;
+using Palera1nWin.Core.Util;
 using Wpf.Ui.Appearance;
 
 namespace Palera1nWin.App;
@@ -14,8 +16,68 @@ public partial class App : Application
     private MainViewModel? _mainViewModel;
     private int _fatalShutdownStarted;
 
-    private void OnStartup(object sender, StartupEventArgs e)
+    private async void OnStartup(object sender, StartupEventArgs e)
     {
+        var selfTest = e.Args.Any(argument =>
+            string.Equals(argument, "--self-test", StringComparison.OrdinalIgnoreCase));
+
+        PackageIntegrityReport integrity;
+        try
+        {
+            integrity = await new PackageIntegrityVerifier().VerifyAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception);
+            if (!selfTest)
+            {
+                MessageBox.Show(
+                    $"Package integrity verification failed before startup:\n\n{exception.Message}",
+                    "Palera1nWin package blocked",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            Shutdown(91);
+            return;
+        }
+
+        if (!integrity.IsValid)
+        {
+            WriteIntegrityFailure(integrity);
+            if (!selfTest)
+            {
+                MessageBox.Show(
+                    "Palera1nWin refused to start because packaged files were changed, removed, or added outside the tested release.\n\n" +
+                    integrity.Summary +
+                    "\n\nDelete this folder and extract a fresh verified release ZIP.",
+                    "Palera1nWin package blocked",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            Shutdown(92);
+            return;
+        }
+
+        if (selfTest)
+        {
+            var settings = AppSettings.Load();
+            var toolchain = Paths.ResolveToolchainRoot(settings.ToolchainRoot);
+            var validToolchain = toolchain is not null && Paths.ValidateToolchain(toolchain, out var missing);
+            var resultPath = Path.Combine(AppContext.BaseDirectory, "self-test-result.txt");
+            try
+            {
+                File.WriteAllText(
+                    resultPath,
+                    integrity.Summary + Environment.NewLine +
+                    (validToolchain
+                        ? "Toolchain validation passed."
+                        : $"Toolchain validation failed: {string.Join(", ", missing ?? [])}"));
+            }
+            catch { }
+            Shutdown(validToolchain ? 0 : 93);
+            return;
+        }
+
         _singleInstanceMutex = new Mutex(initiallyOwned: true, "Palera1nWin.App.SingleInstance", out bool createdNew);
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
@@ -80,6 +142,18 @@ public partial class App : Application
     private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         if (e.ExceptionObject is Exception exception) WriteCrashLog(exception);
+    }
+
+    private static void WriteIntegrityFailure(PackageIntegrityReport report)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppSettings.LogsDirectory);
+            File.WriteAllText(
+                Path.Combine(AppSettings.LogsDirectory, $"integrity-{DateTime.Now:yyyyMMdd-HHmmss}.log"),
+                report.Summary);
+        }
+        catch { }
     }
 
     private static void WriteCrashLog(Exception exception)
