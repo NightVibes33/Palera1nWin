@@ -6,17 +6,11 @@ public static class Paths
 {
     public static IEnumerable<string> GetToolchainCandidates()
     {
-        // 1. A "toolchain" subfolder next to the app (users can drop the toolchain there).
         yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "toolchain"));
 
-        // 2. Environment variable override.
         var env = Environment.GetEnvironmentVariable("PALERA1N_TOOLCHAIN");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            yield return env.Trim();
-        }
+        if (!string.IsNullOrWhiteSpace(env)) yield return env.Trim();
 
-        // 3. Program Files (system-wide install).
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         yield return Path.Combine(programFiles, "Palera1n-Windows");
 
@@ -27,23 +21,38 @@ public static class Paths
     public static string? ResolveToolchainRoot(string? configuredRoot)
     {
         if (!string.IsNullOrWhiteSpace(configuredRoot) && Directory.Exists(configuredRoot))
-        {
             return Path.GetFullPath(configuredRoot);
-        }
 
         foreach (var candidate in GetToolchainCandidates())
         {
-            if (Directory.Exists(candidate))
-            {
-                return Path.GetFullPath(candidate);
-            }
+            if (Directory.Exists(candidate)) return Path.GetFullPath(candidate);
         }
 
         return null;
     }
 
-    public static string GetOpenRa1nExecutable(string toolchainRoot) =>
-        Path.Combine(toolchainRoot, "dist", "openra1n-win", "openra1n.exe");
+    public static string GetOpenRa1nExecutable(string toolchainRoot)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "toolchain", "openra1n.exe"),
+            Path.Combine(toolchainRoot, "openra1n.exe"),
+            Path.Combine(toolchainRoot, "bin", "openra1n.exe"),
+            Path.Combine(toolchainRoot, "dist", "openra1n-win", "openra1n.exe"),
+        };
+        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+    }
+
+    public static string GetOpenRa1nCoreExecutable(string toolchainRoot)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "toolchain", "openra1n-core.exe"),
+            Path.Combine(toolchainRoot, "openra1n-core.exe"),
+            Path.Combine(toolchainRoot, "bin", "openra1n-core.exe"),
+        };
+        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+    }
 
     public static string GetPalera1nCmd(string toolchainRoot) =>
         Path.Combine(toolchainRoot, "palera1n.cmd");
@@ -66,17 +75,9 @@ public static class Paths
     public static string GetZadigExecutable(string toolchainRoot) =>
         ResolveNativeFile(toolchainRoot, "zadig.exe");
 
-    /// <summary>
-    /// Silent libwdi CLI for automated libusbK installs.
-    /// Searches app directory first (bundled), then toolchain dist\native.
-    /// </summary>
     public static string GetWdiSimpleExecutable(string toolchainRoot) =>
         ResolveNativeFile(toolchainRoot, "wdi-simple.exe");
 
-    /// <summary>
-    /// Signal file the GUI creates after the user clicks OK on the DFU Enter dialog.
-    /// Watched by windows\palera1n.ps1 --gui-dfu-prompt.
-    /// </summary>
     public static string GetDfuEnterSignalPath() =>
         Path.Combine(AppSettings.RuntimeDirectory, "dfu-enter.signal");
 
@@ -85,40 +86,34 @@ public static class Paths
         var required = new[]
         {
             GetOpenRa1nExecutable(toolchainRoot),
+            GetOpenRa1nCoreExecutable(toolchainRoot),
             GetPalera1nCmd(toolchainRoot),
             GetFakeCheckra1nScript(toolchainRoot),
         };
 
-        missing = required.Where(path => !File.Exists(path)).ToList();
+        missing = required.Where(path => !File.Exists(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return missing.Count == 0;
     }
 
-    /// <summary>
-    /// Resolve a native binary: check the app's own directory first (for bundled releases),
-    /// then fall back to toolchainRoot\dist\native\.
-    /// </summary>
     private static string ResolveNativeFile(string toolchainRoot, string fileName)
     {
-        // 1. App directory (bundled with the GUI release)
-        var appDir = Path.Combine(AppContext.BaseDirectory, "native", fileName);
-        if (File.Exists(appDir))
-        {
-            return appDir;
-        }
+        var appToolchain = Path.Combine(AppContext.BaseDirectory, "toolchain", fileName);
+        if (File.Exists(appToolchain)) return appToolchain;
 
-        // 2. Toolchain dist\native
+        var appNative = Path.Combine(AppContext.BaseDirectory, "native", fileName);
+        if (File.Exists(appNative)) return appNative;
+
+        var rootFile = Path.Combine(toolchainRoot, fileName);
+        if (File.Exists(rootFile)) return rootFile;
+
         return Path.Combine(toolchainRoot, "dist", "native", fileName);
     }
 
-    private static string ResolveNativeDirectory(string toolchainRoot, string dirName)
+    private static string ResolveNativeDirectory(string toolchainRoot, string directoryName)
     {
-        var appDir = Path.Combine(AppContext.BaseDirectory, "native", dirName);
-        if (Directory.Exists(appDir))
-        {
-            return appDir;
-        }
+        var appDirectory = Path.Combine(AppContext.BaseDirectory, "native", directoryName);
+        if (Directory.Exists(appDirectory)) return appDirectory;
 
-        return Path.Combine(toolchainRoot, "dist", "native", dirName);
+        return Path.Combine(toolchainRoot, "dist", "native", directoryName);
     }
 }
-
