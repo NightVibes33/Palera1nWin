@@ -166,6 +166,7 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
         if (selected?.HasDownload != true) return;
 
         HardwareOperationLease? lease = null;
+        VerifiedDownloadReceipt? receipt = null;
         IsBusy = true;
         try
         {
@@ -177,7 +178,7 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
             DownloadStatus = $"Downloading and verifying {selected.TagName}...";
             _setStatus(DownloadStatus);
             var progress = new Progress<Core.Models.ProgressEventArgs>(e => DownloadStatus = e.Message);
-            var receipt = await _releasesClient.DownloadReleaseBinaryAsync(selected.TagName, destination, progress).ConfigureAwait(true);
+            receipt = await _releasesClient.DownloadReleaseBinaryAsync(selected.TagName, destination, progress).ConfigureAwait(true);
 
             var pongoCheck = PongoCompatibility.CheckBinary(destination, _bundledPongoVersion);
             selected.Pongo = pongoCheck;
@@ -204,6 +205,7 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
             var active = await provision.GetInstalledVersionAsync(distro).ConfigureAwait(true);
             _settings.SelectedReleaseTag = selected.TagName;
             _settings.Save();
+            receipt.Commit();
             DownloadStatus = $"Active in {distro}: {active ?? selected.TagName}. SHA-256 {receipt.Sha256}.";
             _setStatus($"palera1n {selected.TagName} is active.");
             _logService.Append("versions", DownloadStatus);
@@ -216,11 +218,12 @@ public sealed class VersionsViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             DownloadStatus = $"Runtime update failed: {ex.Message}";
-            _setStatus("Release update failed; previous active binary was preserved.");
+            _setStatus("Release update failed; previous active binary was restored.");
             _logService.Append("versions", ex.ToString(), isError: true);
         }
         finally
         {
+            receipt?.Dispose();
             if (lease is not null) await lease.DisposeAsync();
             IsBusy = false;
         }
