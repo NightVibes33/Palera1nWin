@@ -62,7 +62,8 @@ public partial class App : Application
         {
             var settings = AppSettings.Load();
             var toolchain = Paths.ResolveToolchainRoot(settings.ToolchainRoot);
-            var validToolchain = toolchain is not null && Paths.ValidateToolchain(toolchain, out var missing);
+            IReadOnlyList<string> missing = [];
+            var validToolchain = toolchain is not null && Paths.ValidateToolchain(toolchain, out missing);
             var resultPath = Path.Combine(AppContext.BaseDirectory, "self-test-result.txt");
             try
             {
@@ -71,7 +72,7 @@ public partial class App : Application
                     integrity.Summary + Environment.NewLine +
                     (validToolchain
                         ? "Toolchain validation passed."
-                        : $"Toolchain validation failed: {string.Join(", ", missing ?? [])}"));
+                        : $"Toolchain validation failed: {string.Join(", ", missing)}"));
             }
             catch { }
             Shutdown(validToolchain ? 0 : 93);
