@@ -15,44 +15,46 @@ public sealed class DoctorCheckItem
     public required string Name { get; init; }
     public required string Detail { get; init; }
     public required bool Passed { get; init; }
-
     public string StatusText => Passed ? "OK" : "Needs attention";
 }
 
-public sealed class SetupViewModel : ObservableObject
+public sealed class SetupViewModel : ObservableObject, IDisposable
 {
     private readonly AppSettings _settings;
     private readonly AppleUsbMonitor _monitor;
     private readonly LogService _logService;
     private readonly Action<string> _setStatus;
+    private readonly HardwareOperationCoordinator _hardwareOperations;
+    private readonly bool _ownsCoordinator;
     private readonly UsbipdService _usbipdService = new();
-    private readonly WslService _wslService;
-    private readonly WslProvisionService _wslProvisionService;
     private string _toolchainRoot = string.Empty;
     private string _doctorSummary = "Run environment checks to validate your setup.";
     private bool _isBusy;
+    private bool _usbDkDetected;
+    private bool _disposed;
 
     public SetupViewModel(
         AppSettings settings,
         AppleUsbMonitor monitor,
         LogService logService,
-        Action<string> setStatus)
+        Action<string> setStatus,
+        HardwareOperationCoordinator? hardwareOperations = null)
     {
         _settings = settings;
         _monitor = monitor;
         _logService = logService;
         _setStatus = setStatus;
-        _wslService = new WslService(settings.WslDistro);
-        _wslProvisionService = new WslProvisionService(_wslService);
-
+        _hardwareOperations = hardwareOperations ?? new HardwareOperationCoordinator();
+        _ownsCoordinator = hardwareOperations is null;
         _toolchainRoot = settings.ToolchainRoot;
 
-        BrowseToolchainCommand = new RelayCommand(BrowseToolchain);
-        RunDoctorCommand = new AsyncRelayCommand(RunDoctorAsync, () => !IsBusy);
-        InstallDriversCommand = new AsyncRelayCommand(InstallDriversAsync, () => !IsBusy);
-        UninstallUsbDkCommand = new AsyncRelayCommand(UninstallUsbDkAsync, () => !IsBusy);
-        ProvisionWslCommand = new AsyncRelayCommand(ProvisionWslAsync, () => !IsBusy);
-        RefreshUsbDkCommand = new RelayCommand(RefreshUsbDkState);
+        BrowseToolchainCommand = new RelayCommand(BrowseToolchain, CanEditSetup);
+        RunDoctorCommand = new AsyncRelayCommand(RunDoctorAsync, CanRunSetupAction);
+        InstallDriversCommand = new AsyncRelayCommand(InstallDriversAsync, CanRunSetupAction);
+        UninstallUsbDkCommand = new AsyncRelayCommand(UninstallUsbDkAsync, CanRunSetupAction);
+        ProvisionWslCommand = new AsyncRelayCommand(ProvisionWslAsync, CanRunSetupAction);
+        RefreshUsbDkCommand = new RelayCommand(RefreshUsbDkState, CanEditSetup);
+        _hardwareOperations.StateChanged += HardwareOperations_StateChanged;
     }
 
     public ObservableCollection<DoctorCheckItem> DoctorChecks { get; } = [];
@@ -63,415 +65,285 @@ public sealed class SetupViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _toolchainRoot, value))
-            {
                 _settings.ToolchainRoot = value.Trim().TrimEnd('\\', '/');
-            }
         }
     }
 
-    public string DoctorSummary
-    {
-        get => _doctorSummary;
-        private set => SetProperty(ref _doctorSummary, value);
-    }
-
+    public string DoctorSummary { get => _doctorSummary; private set => SetProperty(ref _doctorSummary, value); }
     public bool IsBusy
     {
         get => _isBusy;
         private set
         {
-            if (SetProperty(ref _isBusy, value))
-            {
-                RunDoctorCommand.RaiseCanExecuteChanged();
-                InstallDriversCommand.RaiseCanExecuteChanged();
-                UninstallUsbDkCommand.RaiseCanExecuteChanged();
-            }
+            if (!SetProperty(ref _isBusy, value)) return;
+            RaiseCommandStates();
         }
     }
-
-    private bool _usbDkDetected;
-    public bool UsbDkDetected
-    {
-        get => _usbDkDetected;
-        private set => SetProperty(ref _usbDkDetected, value);
-    }
+    public bool UsbDkDetected { get => _usbDkDetected; private set => SetProperty(ref _usbDkDetected, value); }
 
     public RelayCommand BrowseToolchainCommand { get; }
-
     public AsyncRelayCommand RunDoctorCommand { get; }
-
     public AsyncRelayCommand InstallDriversCommand { get; }
-
     public AsyncRelayCommand UninstallUsbDkCommand { get; }
-
     public AsyncRelayCommand ProvisionWslCommand { get; }
-
     public RelayCommand RefreshUsbDkCommand { get; }
+
+    private bool CanRunSetupAction() => !IsBusy && !_hardwareOperations.Current.IsBusy;
+    private bool CanEditSetup() => !IsBusy && !_hardwareOperations.Current.IsBusy;
+
+    private void HardwareOperations_StateChanged(object? sender, HardwareOperationState e) =>
+        System.Windows.Application.Current?.Dispatcher.Invoke(RaiseCommandStates);
+
+    private void RaiseCommandStates()
+    {
+        BrowseToolchainCommand.RaiseCanExecuteChanged();
+        RunDoctorCommand.RaiseCanExecuteChanged();
+        InstallDriversCommand.RaiseCanExecuteChanged();
+        UninstallUsbDkCommand.RaiseCanExecuteChanged();
+        ProvisionWslCommand.RaiseCanExecuteChanged();
+        RefreshUsbDkCommand.RaiseCanExecuteChanged();
+    }
 
     private void BrowseToolchain()
     {
         var dialog = new OpenFolderDialog
         {
             Title = "Select Palera1n-Windows toolchain root",
-            InitialDirectory = Directory.Exists(ToolchainRoot) ? ToolchainRoot : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            InitialDirectory = Directory.Exists(ToolchainRoot)
+                ? ToolchainRoot
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-
-        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.FolderName))
-        {
-            ToolchainRoot = dialog.FolderName;
-            _settings.Save();
-            _setStatus("Toolchain root updated.");
-        }
+        if (dialog.ShowDialog() != true || string.IsNullOrWhiteSpace(dialog.FolderName)) return;
+        ToolchainRoot = dialog.FolderName;
+        _settings.Save();
+        _setStatus("Toolchain root updated.");
     }
 
     private async Task RunDoctorAsync()
     {
+        HardwareOperationLease? lease = null;
         IsBusy = true;
         DoctorChecks.Clear();
-        _setStatus("Running environment checks...");
-
         try
         {
+            lease = await _hardwareOperations.AcquireAsync(
+                HardwareOperationKind.Diagnostics,
+                "Checking toolchain, WSL and Apple USB state").ConfigureAwait(true);
             _settings.Clamp();
             _settings.Save();
 
             var resolved = Paths.ResolveToolchainRoot(ToolchainRoot);
-            IReadOnlyList<string> missing = Array.Empty<string>();
+            IReadOnlyList<string> missing = [];
             var toolchainOk = resolved is not null && Paths.ValidateToolchain(resolved, out missing);
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "Toolchain root",
-                Detail = toolchainOk
-                    ? resolved!
-                    : missing.Count > 0
-                        ? $"Missing: {string.Join(", ", missing)}"
-                        : "Toolchain path is not configured or does not exist.",
-                Passed = toolchainOk,
-            });
+            Add("Toolchain root", toolchainOk ? resolved! : missing.Count > 0
+                ? $"Missing: {string.Join(", ", missing.Select(Path.GetFileName))}"
+                : "Toolchain path is missing.", toolchainOk);
 
-            var openRa1nPath = resolved is null ? string.Empty : Paths.GetOpenRa1nExecutable(resolved);
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "openra1n.exe",
-                Detail = string.IsNullOrWhiteSpace(openRa1nPath) ? "(unknown)" : openRa1nPath,
-                Passed = !string.IsNullOrWhiteSpace(openRa1nPath) && File.Exists(openRa1nPath),
-            });
+            Add("openra1n.exe",
+                resolved is null ? "Toolchain unresolved." : Paths.GetOpenRa1nExecutable(resolved),
+                resolved is not null && File.Exists(Paths.GetOpenRa1nExecutable(resolved)));
+            Add("usbipd-win", _usbipdService.IsAvailable
+                ? _usbipdService.ExecutablePath ?? "Found"
+                : "usbipd.exe not found.", _usbipdService.IsAvailable);
 
-            var usbipdOk = _usbipdService.IsAvailable;
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "usbipd-win",
-                Detail = usbipdOk
-                    ? _usbipdService.ExecutablePath ?? "Found"
-                    : "usbipd.exe not found in PATH or Program Files.",
-                Passed = usbipdOk,
-            });
+            var wsl = new WslService(_settings.WslDistro);
+            var distro = await wsl.ResolveDistroAsync().ConfigureAwait(true);
+            Add("WSL distro", distro ?? "No WSL distro detected.", distro is not null);
 
-            string? distro = null;
-            try
+            var provisioned = false;
+            string? activeVersion = null;
+            if (distro is not null)
             {
-                distro = await _wslService.ResolveDistroAsync().ConfigureAwait(true);
+                var provision = new WslProvisionService(wsl);
+                provisioned = await provision.IsProvisionedAsync(distro).ConfigureAwait(true);
+                if (provisioned) activeVersion = await provision.GetInstalledVersionAsync(distro).ConfigureAwait(true);
             }
-            catch (Exception ex)
-            {
-                distro = null;
-                _logService.Append("setup", $"WSL check failed: {ex.Message}", isError: true);
-            }
-
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "WSL distro",
-                Detail = distro ?? "No WSL distro detected. Install Ubuntu or set WSL distro in Settings.",
-                Passed = !string.IsNullOrWhiteSpace(distro),
-            });
-
-            // WSL runtime provisioning: is /opt/palera1n/pln-run.sh installed?
-            bool wslProvisioned = false;
-            if (!string.IsNullOrWhiteSpace(distro))
-            {
-                try
-                {
-                    wslProvisioned = await _wslProvisionService
-                        .IsProvisionedAsync(distro)
-                        .ConfigureAwait(true);
-                }
-                catch (Exception ex)
-                {
-                    _logService.Append("setup", $"WSL provision check failed: {ex.Message}", isError: true);
-                }
-            }
-
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "WSL palera1n runtime",
-                Detail = string.IsNullOrWhiteSpace(distro)
-                    ? "Install a WSL distro first."
-                    : wslProvisioned
-                        ? $"Provisioned in {distro} (/opt/palera1n/pln-run.sh)."
-                        : $"Not provisioned in {distro}. Click 'Provision WSL' below (one-time).",
-                Passed = wslProvisioned,
-            });
-
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "Administrator",
-                Detail = Elevation.IsAdmin()
-                    ? "Running elevated (driver install available)."
-                    : "Not elevated. Driver install may prompt for UAC.",
-                Passed = true,
-            });
+            Add("WSL palera1n runtime",
+                provisioned ? $"{activeVersion ?? "palera1n"} active in {distro}." : "Click Provision WSL.",
+                provisioned);
+            Add("Administrator", Elevation.IsAdmin() ? "Running elevated." : "Restart as administrator.", Elevation.IsAdmin());
 
             _monitor.PollNow();
-            var device = _monitor.CurrentDevice;
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "Apple USB device",
-                Detail = device.IsPresent
-                    ? $"{device.Name} ({DeviceModeFormatting.GetLabel(device.Mode)})"
-                    : "No Apple USB device detected. Connect a device to verify drivers.",
-                Passed = device.IsPresent,
-            });
+            var devices = SafeScanDevices();
+            Add("Apple USB device",
+                devices.Count == 0 ? "No Apple USB device detected."
+                : devices.Count == 1 ? devices[0].ToString()
+                : $"{devices.Count} Apple devices detected. Disconnect all but the target before hardware operations.",
+                devices.Count == 1);
 
-            // UsbDk conflict check
-            var usbDkInstalled = DriverInstaller.FindUsbDkUninstaller() is not null;
-            UsbDkDetected = usbDkInstalled;
-            DoctorChecks.Add(new DoctorCheckItem
-            {
-                Name = "UsbDk filter",
-                Detail = usbDkInstalled
-                    ? "UsbDk is installed — conflicts with usbipd. Use 'Uninstall UsbDk' below."
-                    : "Not installed (good).",
-                Passed = !usbDkInstalled,
-            });
+            UsbDkDetected = DriverInstaller.FindUsbDkUninstaller() is not null;
+            Add("UsbDk filter", UsbDkDetected ? "Installed and conflicts with usbipd." : "Not installed.", !UsbDkDetected);
 
-            var passCount = DoctorChecks.Count(c => c.Passed);
-            DoctorSummary = $"{passCount}/{DoctorChecks.Count} checks passed.";
+            var passed = DoctorChecks.Count(check => check.Passed);
+            DoctorSummary = $"{passed}/{DoctorChecks.Count} checks passed.";
             _setStatus(DoctorSummary);
             _logService.Append("setup", DoctorSummary);
         }
+        catch (Exception ex)
+        {
+            DoctorSummary = $"Doctor failed: {ex.Message}";
+            _logService.Append("setup", ex.ToString(), isError: true);
+        }
         finally
         {
+            if (lease is not null) await lease.DisposeAsync();
             IsBusy = false;
         }
+
+        void Add(string name, string detail, bool passed) => DoctorChecks.Add(new DoctorCheckItem
+        {
+            Name = name,
+            Detail = detail,
+            Passed = passed,
+        });
     }
 
     private async Task InstallDriversAsync()
     {
+        HardwareOperationLease? lease = null;
         IsBusy = true;
-        _setStatus("Installing libusbK drivers...");
-        _logService.Append("setup", "Starting driver installation...");
-
         try
         {
-            _settings.Clamp();
-            _settings.Save();
-
+            lease = await _hardwareOperations.AcquireAsync(
+                HardwareOperationKind.DriverRepair,
+                "Installing the exact DFU/Pongo USB driver").ConfigureAwait(true);
             _monitor.PollNow();
-            var device = _monitor.CurrentDevice;
-            if (!device.IsPresent)
-            {
-                var message = "Connect an Apple device in DFU, Recovery, or Pongo mode before installing drivers.";
-                _logService.Append("setup", message, isError: true);
-                DoctorSummary = message;
-                _setStatus("No device for driver install.");
-                return;
-            }
+            var devices = SafeScanDevices();
+            if (devices.Count != 1)
+                throw new InvalidOperationException("Connect exactly one Apple device before changing a USB driver.");
+            var device = devices[0];
+            if (device.ProductId is not (0x1227 or 0x4141))
+                throw new InvalidOperationException("Automatic libusbK installation is allowed only for Apple DFU (1227) or PongoOS (4141), never normal/recovery mode.");
 
             var installer = new DriverInstaller(_settings, _monitor);
             var progress = new Progress<Core.Models.ProgressEventArgs>(e =>
             {
-                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    DoctorSummary = e.Message;
-                    _logService.Append("driver", e.Message, isError: false);
-                });
+                DoctorSummary = e.Message;
+                _logService.Append("driver", e.Message, e.IsError);
             });
-
-            var result = await installer.EnsureLibusbKAsync(
-                device.ProductId,
-                progress).ConfigureAwait(true);
-
-            switch (result)
+            var result = await installer.EnsureLibusbKAsync(device.ProductId, progress).ConfigureAwait(true);
+            DoctorSummary = result switch
             {
-                case DriverInstallResult.AlreadyOk:
-                    DoctorSummary = "libusbK driver is already active.";
-                    break;
-                case DriverInstallResult.Installed:
-                    DoctorSummary = "libusbK driver installed successfully.";
-                    break;
-                case DriverInstallResult.NeedsManualZadig:
-                    DoctorSummary = "Automatic install unavailable. Use Open Zadig on the Device tab.";
-                    break;
-                default:
-                    DoctorSummary = "Driver installation failed. See Logs for details.";
-                    break;
-            }
-
+                DriverInstallResult.AlreadyOk => "The required driver is already active.",
+                DriverInstallResult.Installed => "The required driver installed and re-enumerated successfully.",
+                DriverInstallResult.NeedsManualZadig => "Automatic repair did not verify. Use the locked Zadig action on Device.",
+                _ => "Driver installation failed. See Logs.",
+            };
             _setStatus(DoctorSummary);
         }
         catch (Exception ex)
         {
             DoctorSummary = $"Driver install error: {ex.Message}";
-            _logService.Append("setup", ex.Message, isError: true);
+            _logService.Append("setup", ex.ToString(), isError: true);
             _setStatus("Driver install failed.");
         }
         finally
         {
+            if (lease is not null) await lease.DisposeAsync();
             IsBusy = false;
         }
     }
 
-    private void RefreshUsbDkState()
-    {
-        UsbDkDetected = DriverInstaller.FindUsbDkUninstaller() is not null;
-    }
+    private void RefreshUsbDkState() => UsbDkDetected = DriverInstaller.FindUsbDkUninstaller() is not null;
 
     private async Task UninstallUsbDkAsync()
     {
-        var confirmed = System.Windows.MessageBox.Show(
-            "UsbDk is a USB filter driver that conflicts with usbipd-win and prevents the jailbreak from working reliably.\n\n" +
-            "This will uninstall UsbDk (a UAC prompt will appear). A reboot is recommended afterwards.\n\n" +
-            "Continue?",
-            "Uninstall UsbDk",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Question);
+        if (System.Windows.MessageBox.Show(
+                "This removes the UsbDk filter driver. Other hardware operations will remain locked until the uninstaller exits. Continue?",
+                "Uninstall UsbDk",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes) return;
 
-        if (confirmed != System.Windows.MessageBoxResult.Yes)
-        {
-            return;
-        }
-
+        HardwareOperationLease? lease = null;
         IsBusy = true;
-        _setStatus("Uninstalling UsbDk...");
-        _logService.Append("setup", "Starting UsbDk uninstall...");
-
         try
         {
+            lease = await _hardwareOperations.AcquireAsync(
+                HardwareOperationKind.DriverRepair,
+                "Uninstalling UsbDk").ConfigureAwait(true);
             var installer = new DriverInstaller(_settings, _monitor);
             var progress = new Progress<Core.Models.ProgressEventArgs>(e =>
             {
-                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    DoctorSummary = e.Message;
-                    _logService.Append("driver", e.Message, isError: e.IsError);
-                });
+                DoctorSummary = e.Message;
+                _logService.Append("driver", e.Message, e.IsError);
             });
-
             var ok = await installer.UninstallUsbDkAsync(progress).ConfigureAwait(true);
-
-            UsbDkDetected = DriverInstaller.FindUsbDkUninstaller() is not null;
-            DoctorSummary = ok
-                ? "UsbDk uninstalled. Reboot recommended."
-                : "UsbDk uninstall failed. Try Settings → Apps → UsbDk → Uninstall.";
+            RefreshUsbDkState();
+            DoctorSummary = ok ? "UsbDk uninstalled. Reboot Windows before the next jailbreak." : "UsbDk uninstall failed.";
             _setStatus(DoctorSummary);
-            _logService.Append("setup", DoctorSummary, isError: !ok);
-
-            System.Windows.MessageBox.Show(
-                DoctorSummary,
-                "Uninstall UsbDk",
-                System.Windows.MessageBoxButton.OK,
-                ok ? System.Windows.MessageBoxImage.Information : System.Windows.MessageBoxImage.Warning);
+            _logService.Append("setup", DoctorSummary, !ok);
         }
         catch (Exception ex)
         {
             DoctorSummary = $"UsbDk uninstall error: {ex.Message}";
-            _logService.Append("setup", ex.Message, isError: true);
-            _setStatus("UsbDk uninstall failed.");
+            _logService.Append("setup", ex.ToString(), true);
         }
         finally
         {
+            if (lease is not null) await lease.DisposeAsync();
             IsBusy = false;
         }
     }
 
     private async Task ProvisionWslAsync()
     {
+        HardwareOperationLease? lease = null;
         IsBusy = true;
-        _setStatus("Provisioning WSL runtime...");
-        _logService.Append("setup", "Starting WSL provisioning...");
-
         try
         {
+            lease = await _hardwareOperations.AcquireAsync(
+                HardwareOperationKind.WslProvision,
+                "Provisioning the packaged palera1n WSL runtime").ConfigureAwait(true);
             _settings.Clamp();
             _settings.Save();
-
-            var resolved = Paths.ResolveToolchainRoot(ToolchainRoot);
-            if (resolved is null)
-            {
-                var msg = "Toolchain root is not configured or does not exist. Set it in Settings first.";
-                DoctorSummary = msg;
-                _logService.Append("setup", msg, isError: true);
-                _setStatus("Provision WSL: toolchain missing.");
-                return;
-            }
-
-            // Resolve the actually-installed distro (prefers settings.WslDistro, else the
-            // first available, e.g. "Ubuntu-24.04"). Passing the literal setting would break
-            // provisioning for users whose distro is not named exactly "Ubuntu".
-            var distro = await _wslService.ResolveDistroAsync().ConfigureAwait(true);
-            if (string.IsNullOrWhiteSpace(distro))
-            {
-                var msg = "No WSL distro detected. Install one first: wsl --install -d Ubuntu (admin), reboot, then retry.";
-                DoctorSummary = msg;
-                _logService.Append("setup", msg, isError: true);
-                _setStatus("Provision WSL: no distro.");
-                System.Windows.MessageBox.Show(
-                    msg,
-                    "Provision WSL",
-                    System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Warning);
-                return;
-            }
-
-            DoctorSummary = $"Provisioning WSL '{distro}' (installing runtime + palera1n binary)... this can take a few minutes on first run.";
-            Action<string> progress = line =>
-            {
-                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            var resolved = Paths.ResolveToolchainRoot(ToolchainRoot)
+                           ?? throw new InvalidOperationException("Toolchain root does not exist.");
+            var wsl = new WslService(_settings.WslDistro);
+            var distro = await wsl.ResolveDistroAsync().ConfigureAwait(true)
+                         ?? throw new InvalidOperationException("No WSL distro is installed.");
+            var service = new WslProvisionService(wsl);
+            var downloaded = Path.Combine(AppSettings.RuntimeDirectory, "palera1n-linux-x86_64");
+            var preferred = File.Exists(downloaded) && File.Exists(downloaded + ".verified.json") ? downloaded : null;
+            var result = await service.ProvisionAsync(
+                resolved,
+                distro,
+                line =>
                 {
                     DoctorSummary = line;
-                    _logService.Append("wsl-provision", line, isError: false);
-                });
-            };
-
-            // If the user downloaded a specific release from the Versions tab, keep it:
-            // provision-wsl.sh installs the bundled 2.3 binary, so re-apply the download afterwards.
-            var downloadedBinary = Path.Combine(AppSettings.RuntimeDirectory, "palera1n-linux-x86_64");
-            var preferBinary = File.Exists(downloadedBinary) ? downloadedBinary : null;
-
-            var result = await _wslProvisionService
-                .ProvisionAsync(resolved, distro, progress, preferBinaryPath: preferBinary)
-                .ConfigureAwait(true);
-
-            var provisioned = result.Succeeded
-                && await _wslProvisionService.IsProvisionedAsync(distro).ConfigureAwait(true);
-
-            var activeVersion = provisioned
-                ? await _wslProvisionService.GetInstalledVersionAsync(distro).ConfigureAwait(true)
-                : null;
-
+                    _logService.Append("wsl-provision", line);
+                },
+                preferBinaryPath: preferred).ConfigureAwait(true);
+            var provisioned = result.Succeeded && await service.IsProvisionedAsync(distro).ConfigureAwait(true);
             DoctorSummary = provisioned
-                ? activeVersion is not null
-                    ? $"WSL provisioned. Active runtime: {activeVersion} (/opt/palera1n/)."
-                    : "WSL provisioned. palera1n runtime installed in /opt/palera1n/."
-                : $"WSL provisioning failed (exit {result.ExitCode}). See Logs for details.";
-            _setStatus(provisioned ? "WSL provisioned." : "WSL provisioning failed.");
-            _logService.Append("setup", DoctorSummary, isError: !provisioned);
-
-            System.Windows.MessageBox.Show(
-                DoctorSummary,
-                "Provision WSL",
-                System.Windows.MessageBoxButton.OK,
-                provisioned ? System.Windows.MessageBoxImage.Information : System.Windows.MessageBoxImage.Warning);
+                ? $"WSL provisioned in {distro}: {await service.GetInstalledVersionAsync(distro).ConfigureAwait(true) ?? "palera1n"}."
+                : $"WSL provisioning failed with exit {result.ExitCode}.";
+            _setStatus(DoctorSummary);
+            _logService.Append("setup", DoctorSummary, !provisioned);
         }
         catch (Exception ex)
         {
             DoctorSummary = $"WSL provisioning error: {ex.Message}";
-            _logService.Append("setup", ex.Message, isError: true);
+            _logService.Append("setup", ex.ToString(), true);
             _setStatus("WSL provisioning failed.");
         }
         finally
         {
+            if (lease is not null) await lease.DisposeAsync();
             IsBusy = false;
         }
+    }
+
+    private IReadOnlyList<Core.Models.AppleUsbDevice> SafeScanDevices()
+    {
+        try { return _monitor.ScanDevices().Where(device => device.IsPresent).ToArray(); }
+        catch { return []; }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _hardwareOperations.StateChanged -= HardwareOperations_StateChanged;
+        if (_ownsCoordinator) _hardwareOperations.Dispose();
     }
 }
