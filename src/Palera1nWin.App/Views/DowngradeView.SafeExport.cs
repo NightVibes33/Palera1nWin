@@ -18,6 +18,7 @@ public partial class DowngradeView
         _exportButton.Click += ExportRedactedLatest_Click;
         PostDowngradePanel.IsVisibleChanged -= Operational_PostPanelChanged;
         PostDowngradePanel.IsVisibleChanged += SafeOperational_PostPanelChanged;
+        Dispatcher.BeginInvoke(new Action(InitializeUiHardening));
     }
 
     private async void SafeOperational_PostPanelChanged(object sender, DependencyPropertyChangedEventArgs e)
