@@ -13,6 +13,7 @@ public sealed class JailbreakViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly AppleUsbMonitor _monitor;
     private readonly LogService _logService;
+    private readonly HardwareOperationCoordinator _hardwareOperations;
     private readonly Action<string> _setStatus;
     private CancellationTokenSource? _runCts;
     private bool _isRunning;
@@ -29,11 +30,13 @@ public sealed class JailbreakViewModel : ObservableObject
         AppSettings settings,
         AppleUsbMonitor monitor,
         LogService logService,
+        HardwareOperationCoordinator hardwareOperations,
         Action<string> setStatus)
     {
         _settings = settings;
         _monitor = monitor;
         _logService = logService;
+        _hardwareOperations = hardwareOperations;
         _setStatus = setStatus;
 
         _selectedJailbreakMode = settings.JailbreakMode;
@@ -46,6 +49,7 @@ public sealed class JailbreakViewModel : ObservableObject
         CancelJailbreakCommand = new RelayCommand(CancelJailbreak, () => IsRunning);
 
         _monitor.DeviceChanged += OnDeviceChanged;
+        _hardwareOperations.StateChanged += OnHardwareOperationChanged;
         UpdateDeviceBadge(_monitor.CurrentDevice);
         RefreshLogPreview();
         _logService.LineAdded += (_, _) => RefreshLogPreview();
@@ -123,12 +127,9 @@ public sealed class JailbreakViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Raised when IsRunning changes. MainViewModel uses this to pause/resume the global driver watchdog.
-    /// </summary>
     public event EventHandler<bool>? IsRunningChanged;
 
-    public bool CanStartJailbreak => !IsRunning;
+    public bool CanStartJailbreak => !IsRunning && !_hardwareOperations.Current.IsBusy;
 
     public double Progress
     {
@@ -142,10 +143,6 @@ public sealed class JailbreakViewModel : ObservableObject
         private set => SetProperty(ref _progressText, value);
     }
 
-    /// <summary>
-    /// Optional hint shown to the right of the progress text for long-running
-    /// steps (e.g. "(Might take around a minute)" while palera1n sends payloads).
-    /// </summary>
     public string ProgressHint
     {
         get => _progressHint;
@@ -190,6 +187,24 @@ public sealed class JailbreakViewModel : ObservableObject
         _settings.Save();
 
         _runCts = new CancellationTokenSource();
+        HardwareOperationLease? operationLease = null;
+        try
+        {
+            operationLease = await _hardwareOperations.AcquireAsync(
+                HardwareOperationKind.Jailbreak,
+                "Validating jailbreak toolchain and USB state",
+                _runCts.Token).ConfigureAwait(true);
+        }
+        catch (HardwareOperationBusyException ex)
+        {
+            _logService.Append("jailbreak", ex.Message, isError: true);
+            ProgressText = ex.Message;
+            _setStatus(ex.Message);
+            _runCts.Dispose();
+            _runCts = null;
+            return;
+        }
+
         IsRunning = true;
         Progress = 0;
         ProgressText = "Starting jailbreak...";
@@ -236,6 +251,11 @@ public sealed class JailbreakViewModel : ObservableObject
         }
         finally
         {
+            if (operationLease is not null)
+            {
+                await operationLease.DisposeAsync();
+            }
+
             IsRunning = false;
             ProgressHint = string.Empty;
             _runCts?.Dispose();
@@ -261,8 +281,7 @@ public sealed class JailbreakViewModel : ObservableObject
         {
             Progress = e.Percent ?? 0;
             ProgressText = e.Message;
-            // palera1n's payload stage (fuse lock, sep, ramdisk, overlay, bootx) is
-            // the longest single step — reassure the user it isn't stuck.
+            _hardwareOperations.UpdateDetail(HardwareOperationKind.Jailbreak, e.Message);
             ProgressHint = string.Equals(e.Stage, nameof(JailbreakStage.RunningPalera1n), StringComparison.Ordinal)
                 ? "(Might take around a minute)"
                 : string.Empty;
@@ -272,6 +291,15 @@ public sealed class JailbreakViewModel : ObservableObject
     private void OnDeviceChanged(object? sender, AppleUsbDevice device)
     {
         System.Windows.Application.Current?.Dispatcher.Invoke(() => UpdateDeviceBadge(device));
+    }
+
+    private void OnHardwareOperationChanged(object? sender, HardwareOperationState state)
+    {
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        {
+            OnPropertyChanged(nameof(CanStartJailbreak));
+            StartJailbreakCommand.RaiseCanExecuteChanged();
+        });
     }
 
     private void UpdateDeviceBadge(AppleUsbDevice device)
