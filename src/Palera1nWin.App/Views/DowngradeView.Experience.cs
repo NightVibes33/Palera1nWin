@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
 using DarkSwordRestore.Core;
+using Palera1nWin.App.Services;
 
 namespace Palera1nWin.App.Views;
 
@@ -67,6 +68,7 @@ public partial class DowngradeView
         DfuLiveModeText.Text = snapshot.Mode switch
         {
             AppleDeviceMode.Dfu => "DFU DETECTED — SCREEN MUST BE BLACK",
+            AppleDeviceMode.PwnedDfu => "PWNED DFU DETECTED",
             AppleDeviceMode.Recovery => "RECOVERY MODE DETECTED — RETRY THE BUTTON TIMING",
             AppleDeviceMode.Pongo => "PONGOOS DETECTED",
             AppleDeviceMode.Normal => "NORMAL MODE — READY TO PREPARE",
@@ -75,7 +77,7 @@ public partial class DowngradeView
         };
         DfuLiveModeText.Foreground = snapshot.Mode switch
         {
-            AppleDeviceMode.Dfu or AppleDeviceMode.Pongo => ResourceBrush("Brush.Success"),
+            AppleDeviceMode.Dfu or AppleDeviceMode.PwnedDfu or AppleDeviceMode.Pongo => ResourceBrush("Brush.Success"),
             AppleDeviceMode.Recovery => ResourceBrush("Brush.Danger"),
             _ => ResourceBrush("Brush.TextTertiary")
         };
@@ -113,8 +115,19 @@ public partial class DowngradeView
         _preflightCts?.Cancel();
         _preflightCts?.Dispose();
         _preflightCts = new CancellationTokenSource();
+        var lease = await TryAcquireHardwareLeaseAsync(
+            HardwareOperationKind.DriverRepair,
+            "Running DarkSword preflight and idempotent DFU driver verification",
+            _preflightCts.Token);
+        if (lease is null)
+        {
+            _preflightCts.Dispose();
+            _preflightCts = null;
+            return false;
+        }
+
         RunPreflightButton.IsEnabled = false;
-        PreflightStatusText.Text = "Running all safety, driver, firmware, storage, battery, and connectivity checks...";
+        PreflightStatusText.Text = "Running safety, firmware, storage, device, and verified driver checks...";
         PreflightStatusText.Foreground = ResourceBrush("Brush.Accent");
         _preflightChecks.Clear();
 
@@ -169,10 +182,12 @@ public partial class DowngradeView
         }
         finally
         {
+            await lease.DisposeAsync();
             _preflightCts?.Dispose();
             _preflightCts = null;
-            RunPreflightButton.IsEnabled = !_busy;
+            RunPreflightButton.IsEnabled = !_busy && Shell?.HardwareOperations.Current.IsBusy != true;
             UpdateActionState();
+            RefreshEnhancedActionState();
         }
     }
 
@@ -189,10 +204,7 @@ public partial class DowngradeView
                           ActivationLockCheck.IsChecked == true &&
                           BackupCompatibilityCheck.IsChecked == true;
         var exactTyped = !string.IsNullOrWhiteSpace(DetectedProductType) &&
-                         string.Equals(
-                             ProductTypeConfirmationBox.Text.Trim(),
-                             DetectedProductType,
-                             StringComparison.Ordinal);
+                         string.Equals(ProductTypeConfirmationBox.Text.Trim(), DetectedProductType, StringComparison.Ordinal);
         return backupReady && exactTyped && IsPreflightCurrent();
     }
 
@@ -231,7 +243,7 @@ public partial class DowngradeView
             $"IPSW SHA-256: {_inspection.Sha256}",
             recoverySession is null
                 ? "Action: Completely erase the device and perform a tethered downgrade."
-                : $"Action: Resume safe checkpoint {recoverySession.SessionId}.",
+                : $"Action: Resume hash-validated session {recoverySession.SessionId}.",
             "Cold boots will continue to require this Windows application.",
             string.Empty,
             "Choose Yes only if every line above is correct."
@@ -262,11 +274,11 @@ public partial class DowngradeView
         foreach (var title in new[]
                  {
                      "1. Preparing device",
-                     "2. Installing DFU driver",
+                     "2. Verifying DFU driver",
                      "3. Running checkm8 / PongoOS",
-                     "4. Capturing SHC checkpoints",
+                     "4. Capturing validated SHC artifacts",
                      "5. Restoring firmware",
-                     "6. Building tether-boot profile",
+                     "6. Building validated tether-boot profile",
                      "7. Final tether boot",
                      "8. Verifying completion"
                  })
@@ -294,25 +306,15 @@ public partial class DowngradeView
         {
             var item = _stageTimeline[i];
             if (progress.Stage == RestoreStage.Failed && i == index)
-            {
                 item.Set("Failed", "✕", progress.Detail);
-            }
             else if (progress.Stage == RestoreStage.Cancelled && i == index)
-            {
                 item.Set("Paused", "Ⅱ", progress.Detail);
-            }
             else if (i < index || progress.Stage == RestoreStage.Completed)
-            {
                 item.Set("Complete", "✓", i == index ? progress.Detail : "Completed");
-            }
             else if (i == index)
-            {
                 item.Set("Active", "●", progress.Detail);
-            }
             else
-            {
                 item.Set("Pending", "○", "Waiting");
-            }
         }
     }
 
@@ -323,9 +325,10 @@ public partial class DowngradeView
         {
             _recoveryCandidate = await _recoveryService.FindLatestRecoverableAsync();
             RecoveryStatusText.Text = _recoveryCandidate is null
-                ? "No incomplete session with a safe retry checkpoint was found."
+                ? "No incomplete session with a hash-validated recovery artifact was found."
                 : $"Session {_recoveryCandidate.Session.SessionId}: {_recoveryCandidate.Description}";
-            ResumeSessionButton.IsEnabled = !_busy && _recoveryCandidate?.CanResume == true;
+            var hardwareBusy = Shell?.HardwareOperations.Current.IsBusy == true;
+            ResumeSessionButton.IsEnabled = !hardwareBusy && !_busy && _recoveryCandidate?.CanResume == true;
             RetryStageButton.IsEnabled = ResumeSessionButton.IsEnabled;
         }
         catch (Exception exception)
@@ -359,9 +362,28 @@ public partial class DowngradeView
                 MessageBoxImage.Information);
             return;
         }
+        if (_recoveryCandidate.PteBlock is null && !HasCurrentHardwareValidation())
+        {
+            ShowMessage(
+                "Run Test DFU → PongoOS before resuming a restore or generating new artifacts.",
+                "Hardware gate required",
+                MessageBoxImage.Warning);
+            return;
+        }
         if (!ConfirmFinalDowngradeSummary(_recoveryCandidate.Session)) return;
 
         _operationCts = new CancellationTokenSource();
+        var lease = await TryAcquireHardwareLeaseAsync(
+            HardwareOperationKind.DowngradeRecovery,
+            _recoveryCandidate.Description,
+            _operationCts.Token);
+        if (lease is null)
+        {
+            _operationCts.Dispose();
+            _operationCts = null;
+            return;
+        }
+
         SetBusy(true, "Resuming downgrade", _recoveryCandidate.Description);
         try
         {
@@ -373,12 +395,12 @@ public partial class DowngradeView
                 _operationCts.Token);
             PtePathBox.Text = session.PteBlockPath ?? string.Empty;
             ShowPostDowngradeDashboard(session);
-            ShowMessage("The saved downgrade checkpoint completed successfully.", "Recovery complete", MessageBoxImage.Information);
+            ShowMessage("The hash-validated downgrade recovery completed successfully.", "Recovery complete", MessageBoxImage.Information);
         }
         catch (OperationCanceledException)
         {
             CurrentStageText.Text = "Paused";
-            CurrentDetailText.Text = "Recovery was paused. The safe checkpoint remains available.";
+            CurrentDetailText.Text = "Recovery was paused. Validated artifacts remain available.";
             AppendLog("Recovery operation paused by the user.");
         }
         catch (Exception exception)
@@ -388,6 +410,7 @@ public partial class DowngradeView
         }
         finally
         {
+            await lease.DisposeAsync();
             _operationCts?.Dispose();
             _operationCts = null;
             SetBusy(false, CurrentStageText.Text, CurrentDetailText.Text);
