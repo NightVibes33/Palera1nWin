@@ -37,10 +37,120 @@ public sealed record ToolchainPaths(
         .ToArray();
 }
 
+public sealed class ToolProcessSession : IAsyncDisposable
+{
+    private readonly Process _process;
+    private readonly List<string> _stdout = [];
+    private readonly List<string> _stderr = [];
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+    private readonly CancellationTokenRegistration _cancellationRegistration;
+    private int _disposed;
+
+    internal ToolProcessSession(
+        string fileName,
+        IEnumerable<string> arguments,
+        string? workingDirectory,
+        Action<string>? onOutput,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(fileName) ?? AppContext.BaseDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+
+        FileName = fileName;
+        Arguments = string.Join(' ', startInfo.ArgumentList.Select(QuoteForLog));
+        _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is null) return;
+            lock (_stdout) _stdout.Add(args.Data);
+            onOutput?.Invoke(args.Data);
+        };
+        _process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is null) return;
+            lock (_stderr) _stderr.Add(args.Data);
+            onOutput?.Invoke(args.Data);
+        };
+
+        if (!_process.Start()) throw new InvalidOperationException($"Unable to start {fileName}.");
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+        _cancellationRegistration = cancellationToken.Register(Kill);
+        Completion = CompleteAsync();
+    }
+
+    public string FileName { get; }
+    public string Arguments { get; }
+    public Task<ToolResult> Completion { get; }
+
+    public bool HasExited
+    {
+        get
+        {
+            try { return _process.HasExited; }
+            catch { return true; }
+        }
+    }
+
+    public void Kill()
+    {
+        try
+        {
+            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Process may exit while cancellation/cleanup is running.
+        }
+    }
+
+    private async Task<ToolResult> CompleteAsync()
+    {
+        await _process.WaitForExitAsync().ConfigureAwait(false);
+        _process.WaitForExit();
+        _stopwatch.Stop();
+        string stdout;
+        string stderr;
+        lock (_stdout) stdout = string.Join(Environment.NewLine, _stdout);
+        lock (_stderr) stderr = string.Join(Environment.NewLine, _stderr);
+        return new ToolResult(FileName, Arguments, _process.ExitCode, stdout, stderr, _stopwatch.Elapsed);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Kill();
+        try { await Completion.ConfigureAwait(false); } catch { }
+        _cancellationRegistration.Dispose();
+        _process.Dispose();
+    }
+
+    private static string QuoteForLog(string value) => value.Any(char.IsWhiteSpace) ? $"\"{value}\"" : value;
+}
+
 public sealed class ToolProcessRunner
 {
     private const int ErrorAccessDenied = 5;
     private const int ErrorCancelled = 1223;
+
+    public ToolProcessSession StartSession(
+        string fileName,
+        IEnumerable<string> arguments,
+        string? workingDirectory,
+        Action<string>? onOutput,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(fileName)) throw new FileNotFoundException("Required tool was not found.", fileName);
+        return new ToolProcessSession(fileName, arguments, workingDirectory, onOutput, cancellationToken);
+    }
 
     public async Task<ToolResult> RunAsync(
         string fileName,
@@ -167,8 +277,8 @@ public sealed class ToolProcessRunner
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
         {
             throw new InvalidOperationException(
-                $"Windows administrator approval was cancelled. DarkSword did not install the Apple DFU libusbK driver. " +
-                $"Run Palera1nWin as administrator, retry the downgrade, and choose Yes on the User Account Control prompt for {Path.GetFileName(startInfo.FileName)}.",
+                $"Windows administrator approval was cancelled. DarkSword did not install the required Apple USB driver. " +
+                $"Run Palera1nWin as administrator, retry, and choose Yes for {Path.GetFileName(startInfo.FileName)}.",
                 exception);
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorAccessDenied)
@@ -198,8 +308,8 @@ public sealed class ToolProcessRunner
             if (!result.Success)
             {
                 throw new InvalidOperationException(
-                    $"{Path.GetFileName(startInfo.FileName)} could not install the Apple DFU libusbK driver and exited with code {result.ExitCode}. " +
-                    "Reconnect the device in DFU mode, run Palera1nWin as administrator, and retry.");
+                    $"{Path.GetFileName(startInfo.FileName)} could not install the required Apple USB driver and exited with code {result.ExitCode}. " +
+                    "Reconnect the device in the requested mode, run Palera1nWin as administrator, and retry.");
             }
             return result;
         }
