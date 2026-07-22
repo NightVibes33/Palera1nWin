@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using DarkSwordRestore.Core;
+using Palera1nWin.App.Services;
 
 namespace Palera1nWin.App.Views;
 
@@ -15,6 +16,7 @@ public partial class DowngradeView
         _experienceHooksWired = true;
         InitializeDowngradeExperience();
         InitializeOperationalExperience();
+        InitializeBootProfiles();
         WireOperationalDeferredHooks();
 
         StartDowngradeButton.Click -= StartDowngrade_Click;
@@ -49,16 +51,20 @@ public partial class DowngradeView
     private async void Experience_Loaded(object sender, RoutedEventArgs e)
     {
         InitializeOperationalExperience();
+        InitializeBootProfiles();
         WireOperationalDeferredHooks();
         try
         {
-            UpdateExperienceDeviceState(await _monitor.ProbeAsync());
+            var snapshot = await _monitor.ProbeAsync();
+            UpdateExperienceDeviceState(snapshot);
+            await RefreshBootProfileAsync(snapshot);
         }
         catch (Exception exception)
         {
             AppendLog($"Enhanced experience device probe failed: {exception.Message}");
         }
         await RefreshRecoveryStateAsync();
+        RefreshHardwareValidationUi();
         RefreshEnhancedActionState();
     }
 
@@ -66,6 +72,7 @@ public partial class DowngradeView
         Dispatcher.BeginInvoke(() =>
         {
             UpdateExperienceDeviceState(snapshot);
+            RefreshHardwareValidationUi();
             RefreshEnhancedActionState();
         });
 
@@ -107,14 +114,22 @@ public partial class DowngradeView
             var toolchainReady = _tools.MissingFiles().Count == 0 &&
                                  File.Exists(Path.Combine(resources, "sep_racer.bin")) &&
                                  File.Exists(Path.Combine(resources, "kpf.bin"));
-            StartDowngradeButton.IsEnabled = !_busy &&
-                                             confirmations &&
-                                             toolchainReady &&
-                                             IsActiveRestoreTargetReady() &&
-                                             IsEnhancedSafetyReady();
-            RunPreflightButton.IsEnabled = !_busy && _preflightCts is null;
-            ResumeSessionButton.IsEnabled = !_busy && _recoveryCandidate?.CanResume == true;
+            var hardwareBusy = Shell?.HardwareOperations.Current.IsBusy == true;
+            StartDowngradeButton.IsEnabled = !hardwareBusy &&
+                                              !_busy &&
+                                              confirmations &&
+                                              toolchainReady &&
+                                              HasCurrentHardwareValidation() &&
+                                              IsActiveRestoreTargetReady() &&
+                                              IsEnhancedSafetyReady();
+            RunPreflightButton.IsEnabled = !hardwareBusy && !_busy && _preflightCts is null;
+            ResumeSessionButton.IsEnabled = !hardwareBusy && !_busy && _recoveryCandidate?.CanResume == true;
             RetryStageButton.IsEnabled = ResumeSessionButton.IsEnabled;
+            ValidateHardwareButton.IsEnabled = !hardwareBusy && !_busy && toolchainReady;
+            if (_bootProfileHooksWired)
+            {
+                SetBootButtonEnabled(_bootAssetValidated && CanUseBootButton());
+            }
         }
         finally
         {
@@ -132,6 +147,14 @@ public partial class DowngradeView
                 MessageBoxImage.Information);
             return;
         }
+        if (!HasCurrentHardwareValidation())
+        {
+            ShowMessage(
+                "Run Test DFU → PongoOS successfully before starting a destructive restore.",
+                "Hardware gate required",
+                MessageBoxImage.Warning);
+            return;
+        }
 
         if (!IsPreflightCurrent() && !await RunPreflightAsync(showResultDialog: false)) return;
         if (!IsEnhancedSafetyReady())
@@ -147,7 +170,18 @@ public partial class DowngradeView
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _operationCts = new CancellationTokenSource();
-        SetBusy(true, "Starting downgrade", "Using the verified exact-device preflight report and creating recovery checkpoints.");
+        var lease = await TryAcquireHardwareLeaseAsync(
+            HardwareOperationKind.Downgrade,
+            "Full tethered downgrade using validated DFU/Pongo hardware",
+            _operationCts.Token);
+        if (lease is null)
+        {
+            _operationCts.Dispose();
+            _operationCts = null;
+            return;
+        }
+
+        SetBusy(true, "Starting downgrade", "Using the verified hardware gate and exact-device preflight report.");
         RefreshEnhancedActionState();
 
         try
@@ -161,15 +195,16 @@ public partial class DowngradeView
 
             PtePathBox.Text = session.PteBlockPath ?? string.Empty;
             ShowPostDowngradeDashboard(session);
+            await SaveCompletedBootProfileAsync(session);
             await RefreshRecoveryStateAsync();
             ShowMessage(
-                $"Downgrade completed.\n\nSession: {session.SessionId}\nBoot asset: {session.PteBlockPath}\n\nThe post-downgrade dashboard is now verifying the device.",
+                $"Downgrade completed.\n\nSession: {session.SessionId}\nBoot asset: {session.PteBlockPath}\n\nThe exact-device cold-boot profile was validated and saved.",
                 "Downgrade complete",
                 MessageBoxImage.Information);
         }
         catch (OperationCanceledException)
         {
-            var progress = new RestoreProgress(RestoreStage.Cancelled, OperationProgress.Value, "Paused", "The operation was paused. Completed safe checkpoints remain in the session folder.");
+            var progress = new RestoreProgress(RestoreStage.Cancelled, OperationProgress.Value, "Paused", "The operation was paused. Hash-validated artifacts remain in the session folder.");
             HandleEnhancedProgress(progress);
             AppendLog("Downgrade operation paused by the user.");
         }
@@ -180,12 +215,13 @@ public partial class DowngradeView
             AppendLog(exception.ToString());
             var guidance = DowngradeFailureTranslator.Translate(exception.Message, stage);
             ShowMessage(
-                guidance.DisplayText + "\n\nOpen Recovery & Targeted Retry to resume from the newest safe checkpoint.",
+                guidance.DisplayText + "\n\nRecovery will offer only hash-validated SHC/PTE artifacts.",
                 guidance.Title,
                 MessageBoxImage.Error);
         }
         finally
         {
+            await lease.DisposeAsync();
             _operationCts?.Dispose();
             _operationCts = null;
             SetBusy(false, CurrentStageText.Text, CurrentDetailText.Text);

@@ -9,7 +9,7 @@ $releaseRoot = Split-Path -Parent $PackageRoot
 $logDirectory = Join-Path $PackageRoot "smoke-logs"
 $statusLog = Join-Path $logDirectory "smoke-status.txt"
 New-Item -ItemType Directory -Force $logDirectory | Out-Null
-"Palera1nWin DarkSword deterministic package smoke test" | Set-Content $statusLog -Encoding UTF8
+"Palera1nWin unified hardware pipeline deterministic package smoke test" | Set-Content $statusLog -Encoding UTF8
 
 function Write-Status([string]$Message) {
     Add-Content -LiteralPath $statusLog -Value $Message -Encoding UTF8
@@ -55,6 +55,18 @@ function Assert-BinaryString([string]$RelativePath, [string]$Expected) {
         throw "Expected capability string '$Expected' was not found in $RelativePath"
     }
     Write-Status "OK capability $RelativePath :: $Expected"
+}
+
+function Assert-BinaryDoesNotContain([string]$RelativePath, [string]$Unexpected) {
+    $path = Join-Path $PackageRoot $RelativePath
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+    $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
+    if ($ascii.Contains($Unexpected, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $unicode.Contains($Unexpected, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unexpected legacy capability string '$Unexpected' was found in $RelativePath"
+    }
+    Write-Status "OK legacy capability absent $RelativePath :: $Unexpected"
 }
 
 function Invoke-CapturedProcess {
@@ -108,12 +120,17 @@ try {
     Assert-BinaryString "Palera1nWin.dll" "FirmwareFeatures_Loaded"
     Assert-BinaryString "Palera1nWin.dll" "LoadFirmwareCatalogAsync"
     Assert-BinaryString "Palera1nWin.dll" "InitializeOperationalExperience"
+    Assert-BinaryString "Palera1nWin.dll" "HardwareOperationCoordinator"
+    Assert-BinaryString "Palera1nWin.dll" "ValidateHardware_Click"
     Assert-BinaryString "Palera1nWin.dll" "DarkSwordRestore.Core"
     Assert-BinaryString "DarkSwordRestore.Core.dll" "CompatibilityAssessmentService"
     Assert-BinaryString "DarkSwordRestore.Core.dll" "CableStabilityTracker"
     Assert-BinaryString "DarkSwordRestore.Core.dll" "SessionExportService"
     Assert-BinaryString "DarkSwordRestore.Core.dll" "DowngradeFailureTranslator"
     Assert-BinaryString "DarkSwordRestore.Core.dll" "PowerProtectionLease"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "ValidateDfuToPongoAsync"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "DarkSwordBootProfile"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "DarkSwordJailbroken"
 
     Assert-File "toolchain\native-build-manifest.txt" 32 | Out-Null
     Assert-File "toolchain\resources\sep_racer.bin" 128 | Out-Null
@@ -155,8 +172,9 @@ try {
     Assert-BinaryString "toolchain\darksword-pongo.exe" "sep pwn_pte"
     Assert-BinaryString "toolchain\darksword-pongo.exe" "bootux"
     Assert-BinaryString "toolchain\openra1n.exe" "openra1n-core.exe"
-    Assert-BinaryString "toolchain\openra1n.exe" "wdi-simple.exe"
-    Assert-BinaryString "toolchain\openra1n.exe" "0x4141"
+    Assert-BinaryString "toolchain\openra1n.exe" "PongoOS USB 05AC:4141"
+    Assert-BinaryString "toolchain\openra1n.exe" "USB drivers remain managed by the host application"
+    Assert-BinaryDoesNotContain "toolchain\openra1n.exe" "wdi-simple.exe"
 
     $nativeManifest = Get-Content (Join-Path $toolchain "native-build-manifest.txt") -Raw
     foreach ($token in @("resource-sha384=", "idevicerestore=", "openra1n=", "libfragmentzip-version=")) {
@@ -207,7 +225,7 @@ try {
         throw "Release ZIP SHA-256 mismatch."
     }
     Write-Status "OK release ZIP SHA-256 $actualZipHash"
-    Write-Status "Unified Palera1nWin package smoke test passed. Physical DFU/restore testing remains required."
+    Write-Status "Unified Palera1nWin package smoke test passed. Physical DFU, restore, cold-boot, and combined-plan testing remain required."
 }
 catch {
     Write-Status "FAILED: $($_.Exception.Message)"

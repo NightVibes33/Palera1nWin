@@ -74,7 +74,7 @@ text = text.replace(old_turdus_copy, new_turdus_copy, 1)
 # Preserve the original Windows openra1n binary as the core checkm8/PongoOS
 # engine. Its upstream Makefile names the output "openra1n" even though MinGW
 # creates "openra1n.exe", causing the strip step to fail. Correct BIN before
-# compiling, then build the user-facing driver-readiness wrapper.
+# compiling, then build the user-facing process/USB-readiness wrapper.
 old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
@@ -85,9 +85,10 @@ make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
-gcc -std=c11 -O2 -Wall -Wextra -municode \
-  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \
-  -o "$STAGE/openra1n.exe"
+gcc -std=c11 -O2 -Wall -Wextra -municode \\
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
+  -o "$STAGE/openra1n.exe" \\
+  -lsetupapi
 '''
 if old_openra1n not in text:
     raise SystemExit("Could not locate the openra1n packaging block")

@@ -8,7 +8,7 @@
         <StackPanel>
           <TextBlock Text="Jailbreak" Style="{StaticResource Text.Title}"/>
           <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
-                     Text="Run the hybrid openra1n + WSL palera1n flow from Windows. Connect your device and enter DFU when prompted."/>
+                     Text="Run the controlled Windows openra1n + WSL palera1n flow. Jailbreak, downgrade, recovery, and cold boot share one exclusive hardware pipeline."/>
         </StackPanel>
         <Border HorizontalAlignment="Right" VerticalAlignment="Top" Style="{StaticResource Badge}"
                 Background="{Binding DeviceModeBadgeBackground}">
@@ -17,11 +17,15 @@
         </Border>
       </Grid>
 
+      <ui:InfoBar Margin="0,20,0,0" Severity="Informational" IsOpen="True" IsClosable="False"
+                  Title="Transactional USB ownership"
+                  Message="The app makes no driver changes while idle. During jailbreak it explicitly transfers Apple USB between WSL and Windows, verifies DFU/Pongo bindings, and blocks Downgrade or Boot Device from running at the same time."/>
+
       <Border Style="{StaticResource Card.Accent}" Margin="0,22,0,0">
         <StackPanel>
           <TextBlock Text="Start jailbreak" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
           <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
-                     Text="This runs validation, driver checks, openra1n, and palera1n with your selected options."/>
+                     Text="This runs validation, bounded DFU guidance, explicit Windows/WSL ownership handoffs, one verified driver transaction per USB mode, openra1n, and palera1n."/>
           <StackPanel Orientation="Horizontal">
             <ui:Button Content="Start Jailbreak" Appearance="Primary" Padding="24,10"
                        Command="{Binding StartJailbreakCommand}"/>
@@ -86,7 +90,7 @@
             <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
               <TextBlock Text="Safe mode" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
               <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
-                         Text="Boot into safe mode after jailbreak (no tweak injection)."/>
+                         Text="Boot into safe mode after jailbreak without tweak injection."/>
             </StackPanel>
             <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding SafeMode}"/>
           </Grid>
@@ -108,18 +112,15 @@
 
           <Separator Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,14"/>
 
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*"/>
-              <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" MaxWidth="560" HorizontalAlignment="Left">
-              <TextBlock Text="Auto-install drivers" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
-              <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0"
-                         Text="Attempt libusbK installation automatically during jailbreak."/>
+          <Border Padding="12" CornerRadius="6"
+                  Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                  BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+            <StackPanel>
+              <TextBlock Text="USB driver policy" Style="{StaticResource Text.Body}" FontWeight="Medium"/>
+              <TextBlock Style="{StaticResource Text.Caption}" Margin="0,3,0,0" TextWrapping="Wrap"
+                         Text="Automatic repair runs only when the active jailbreak transaction proves the exact DFU or Pongo binding is wrong. No global watchdog or idle reinstallation loop is used."/>
             </StackPanel>
-            <ui:ToggleSwitch Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" IsChecked="{Binding AutoInstallDrivers}"/>
-          </Grid>
+          </Border>
         </StackPanel>
       </ui:Card>
 
