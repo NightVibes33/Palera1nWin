@@ -129,7 +129,7 @@ new_openra1n = '''python - openra1n.c <<'PY_OPENRA1N'
 from pathlib import Path
 path = Path("openra1n.c")
 source = path.read_text(encoding="utf-8")
-old = '''int main(int argc, char **argv) {
+old = """int main(int argc, char **argv) {
 \tLOG_RAINBOW("-=-=- openra1n -=-=-");
 \tint ret = EXIT_FAILURE;
 \tusb_handle_t handle;
@@ -140,8 +140,8 @@ old = '''int main(int argc, char **argv) {
 \tsleep_ms(3000);
 \tcheckm8_boot_pongo(&handle);
 \treturn ret;
-}'''
-new = '''int main(int argc, char **argv) {
+}"""
+new = """int main(int argc, char **argv) {
 \tLOG_RAINBOW("-=-=- openra1n -=-=-");
 \tusb_handle_t handle;
 \tusb_timeout = 5;
@@ -155,7 +155,7 @@ new = '''int main(int argc, char **argv) {
 \tcheckm8_boot_pongo(&handle);
 \tLOG_INFO("PongoOS payload sent; Windows may temporarily show the device as disconnected while 05AC:4141 enumerates");
 \treturn EXIT_SUCCESS;
-}'''
+}"""
 if old not in source:
     raise SystemExit("Pinned openra1n main function changed; refusing an unreviewed patch")
 path.write_text(source.replace(old, new, 1), encoding="utf-8", newline="\n")
