@@ -602,6 +602,8 @@ public partial class DowngradeView : UserControl, IDisposable
         if (_disposed) return;
 
         _disposed = true;
+        DisposeBootProfiles();
+        DisposeDowngradeExperience();
         DisposeFirmwareFeatures();
         _operationCts?.Cancel();
         _operationCts?.Dispose();
