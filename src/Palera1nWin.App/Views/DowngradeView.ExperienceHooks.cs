@@ -19,10 +19,11 @@ public partial class DowngradeView
         InitializeSafeExportOverrides();
         InitializeBootProfiles();
         WireOperationalDeferredHooks();
+        InitializeSimpleDowngradeUi();
 
-        // Replace every destructive/recovery entry point with the schema-2 exact
-        // ProductType+ECID gate. The original handlers remain private implementation
-        // details and are called only after the exact guard has been armed.
+        // Keep the original entry points wired behind the simplified surface. They
+        // remain available to recovery/profile internals, but users no longer have
+        // to complete a maze of typed confirmations and checkboxes.
         StartDowngradeButton.Click -= StartDowngrade_Click;
         StartDowngradeButton.Click -= StartEnhancedDowngrade_Click;
         StartDowngradeButton.Click += StartIdentityBoundDowngrade_Click;
@@ -68,6 +69,8 @@ public partial class DowngradeView
         InitializeSafeExportOverrides();
         InitializeBootProfiles();
         WireOperationalDeferredHooks();
+        InitializeSimpleDowngradeUi();
+        ApplySimpleDowngradeLayout();
         try
         {
             var snapshot = await _monitor.ProbeAsync();
@@ -82,6 +85,7 @@ public partial class DowngradeView
         RefreshHardwareValidationUi();
         RefreshExactHardwareValidationUi();
         RefreshEnhancedActionState();
+        RefreshSimpleModeState();
     }
 
     private void Experience_DeviceChanged(object? sender, AppleDeviceSnapshot snapshot) =>
@@ -91,21 +95,24 @@ public partial class DowngradeView
             RefreshHardwareValidationUi();
             RefreshExactHardwareValidationUi();
             RefreshEnhancedActionState();
+            RefreshSimpleModeState();
         });
 
     private void ExperienceFirmwareChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
-        InvalidatePreflight("Firmware path changed. Inspect the IPSW and run preflight again.");
+        InvalidatePreflight("Firmware path changed. Inspection will run automatically when Start Downgrade is pressed.");
         RefreshEnhancedActionState();
+        RefreshSimpleModeState();
     }
 
     private void ExperienceFirmwareSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (_lastPreflight is not null)
         {
-            InvalidatePreflight("Firmware selection changed. Download or inspect it, then run preflight again.");
+            InvalidatePreflight("Firmware selection changed. Start Downgrade will inspect it automatically.");
         }
         RefreshEnhancedActionState();
+        RefreshSimpleModeState();
     }
 
     private void ExperienceSafetyChanged(object sender, RoutedEventArgs e) => RefreshEnhancedActionState();
@@ -149,6 +156,7 @@ public partial class DowngradeView
             {
                 SetBootButtonEnabled(_bootAssetValidated && CanUseBootButton());
             }
+            RefreshSimpleModeState();
         }
         finally
         {
