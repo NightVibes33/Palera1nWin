@@ -90,7 +90,8 @@ for ($index = 0; $index -lt $arguments.Count; $index++) {
     }
 }
 
-if ($distro -match '[\x00-\x1f]') { throw 'Invalid WSL distro name.' }
+if ($distro -notmatch '^[A-Za-z0-9._-]+$') { throw 'Invalid WSL distro name.' }
+if ($busId -and $busId -notmatch '^\d+-\d+(?:\.\d+)*$') { throw 'Invalid usbipd bus id.' }
 $toolchain = Split-Path -Parent $PSScriptRoot
 $provisionScript = Join-Path $toolchain 'build\provision-wsl.sh'
 $fakeCheckra1n = Join-Path $toolchain 'build\fake-checkra1n.sh'
@@ -99,6 +100,10 @@ $bundledBinary = Join-Path $toolchain 'dist\palera1n-linux-x86_64'
 if ($selfTest) {
     foreach ($required in @($provisionScript, $fakeCheckra1n, $bundledBinary)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing packaged runtime file: $required" }
+    }
+    $bytes = [IO.File]::ReadAllBytes($bundledBinary)
+    if ($bytes.Length -lt 65536 -or $bytes[0] -ne 0x7F -or $bytes[1] -ne 0x45 -or $bytes[2] -ne 0x4C -or $bytes[3] -ne 0x46) {
+        throw 'The packaged palera1n runtime is not a valid ELF executable.'
     }
     Write-Stage 'SELF-TEST OK: launcher, WSL provisioner, compatibility shim, and Linux binary are packaged.'
     exit 0
@@ -109,6 +114,8 @@ if (-not $skipAttach -and -not $script:Usbipd) { throw 'usbipd-win is not instal
 
 $selected = $null
 $temporaryScript = $null
+$process = $null
+$promptSignal = [Threading.ManualResetEventSlim]::new($false)
 try {
     if (-not $skipAttach) {
         $selected = Require-SelectedBus $busId
@@ -131,7 +138,7 @@ try {
 
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = 'wsl.exe'
-    $start.Arguments = '-d "' + $distro.Replace('"', '') + '" -u root -- bash "' + $wslScript.Replace('"', '') + '"'
+    $start.Arguments = '-d "' + $distro + '" -u root -- bash "' + $wslScript.Replace('"', '') + '"'
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
@@ -141,14 +148,13 @@ try {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     $process.EnableRaisingEvents = $true
-    $promptPending = 0
     $process.add_OutputDataReceived({
         param($sender, $event)
         if ($null -eq $event.Data) { return }
         [Console]::Out.WriteLine($event.Data)
         [Console]::Out.Flush()
         if ($guiDfuPrompt -and $event.Data.IndexOf('Press Enter when ready for DFU mode', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            [Threading.Interlocked]::Exchange([ref]$promptPending, 1) | Out-Null
+            $promptSignal.Set()
         }
     })
     $process.add_ErrorDataReceived({
@@ -157,7 +163,7 @@ try {
         [Console]::Error.WriteLine($event.Data)
         [Console]::Error.Flush()
         if ($guiDfuPrompt -and $event.Data.IndexOf('Press Enter when ready for DFU mode', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            [Threading.Interlocked]::Exchange([ref]$promptPending, 1) | Out-Null
+            $promptSignal.Set()
         }
     })
 
@@ -168,13 +174,13 @@ try {
     $promptDeadline = $null
 
     while (-not $process.HasExited) {
-        if ($guiDfuPrompt -and [Threading.Volatile]::Read([ref]$promptPending) -eq 1) {
+        if ($guiDfuPrompt -and $promptSignal.IsSet) {
             if (-not $promptDeadline) { $promptDeadline = [DateTimeOffset]::UtcNow.AddMinutes(3) }
             if (Test-Path -LiteralPath $signal) {
                 Remove-Item -LiteralPath $signal -Force -ErrorAction SilentlyContinue
                 $process.StandardInput.WriteLine()
                 $process.StandardInput.Flush()
-                [Threading.Interlocked]::Exchange([ref]$promptPending, 0) | Out-Null
+                $promptSignal.Reset()
                 $promptDeadline = $null
                 Write-Stage 'GUI DFU confirmation delivered to palera1n.'
             } elseif ([DateTimeOffset]::UtcNow -gt $promptDeadline) {
@@ -187,10 +193,14 @@ try {
 
     $process.WaitForExit()
     $exitCode = $process.ExitCode
-    $process.Dispose()
     exit $exitCode
 }
 finally {
+    if ($process) {
+        try { if (-not $process.HasExited) { $process.Kill() } } catch { }
+        try { $process.Dispose() } catch { }
+    }
+    $promptSignal.Dispose()
     if ($temporaryScript) { Remove-Item -LiteralPath $temporaryScript -Force -ErrorAction SilentlyContinue }
     if (-not $skipAttach -and -not $keepShared -and $selected -and $script:Usbipd) {
         Invoke-Usbipd @('detach', '--busid', $selected.BusId) -IgnoreExit | Out-Null
