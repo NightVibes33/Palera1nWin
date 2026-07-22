@@ -86,8 +86,12 @@ public sealed class IpswInspector
                         foreach (var type in ReadStringArray(rootDict, "SupportedProductTypes")) productTypes.Add(type);
                         if (productTypes.Count == 0)
                         {
-                            foreach (var type in document.Descendants("string").Select(x => x.Value).Where(ProductTypePattern.IsMatch))
+                            foreach (var type in document.Descendants("string")
+                                         .Select(x => x.Value)
+                                         .Where(value => ProductTypePattern.IsMatch(value)))
+                            {
                                 productTypes.Add(type);
+                            }
                         }
                     }
                 }
