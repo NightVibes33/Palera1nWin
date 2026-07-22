@@ -1,7 +1,6 @@
 using System.Reflection;
 using Palera1nWin.App.Mvvm;
 using Palera1nWin.App.Services;
-using Palera1nWin.Core.Drivers;
 using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Usb;
 using Palera1nWin.Core.Util;
@@ -13,7 +12,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AppSettings _settings;
     private readonly AppleUsbMonitor _monitor;
     private readonly LogService _logService;
-    private readonly LibusbKWatchdog _driverWatchdog;
+    private readonly HardwareOperationCoordinator _hardwareOperations;
     private string _statusText = "Ready";
 
     public MainViewModel()
@@ -21,10 +20,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _settings = AppSettings.Load();
         _logService = new LogService();
         _monitor = new AppleUsbMonitor();
+        _hardwareOperations = new HardwareOperationCoordinator();
 
         _logService.Append("app", "Palera1nWin started.");
+        _logService.Append("driver", "Idle driver mutation is disabled. Drivers are changed only inside an exclusive hardware operation.");
 
-        Jailbreak = new JailbreakViewModel(_settings, _monitor, _logService, SetStatus);
+        Jailbreak = new JailbreakViewModel(_settings, _monitor, _logService, _hardwareOperations, SetStatus);
         Device = new DeviceViewModel(_monitor, _settings, SetStatus, _logService);
         Versions = new VersionsViewModel(_settings, _logService, SetStatus);
         Setup = new SetupViewModel(_settings, _monitor, _logService, SetStatus);
@@ -36,15 +37,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OpenLogsFolderCommand = new RelayCommand(OpenLogsFolder);
 
         _monitor.DeviceChanged += OnDeviceChanged;
+        _hardwareOperations.StateChanged += OnHardwareOperationChanged;
         UpdateDeviceStatus(_monitor.CurrentDevice);
-
-        // Global driver watchdog: keep DFU/Pongo on libusbK whenever the app is open.
-        // Skips VBoxUSB (device in WSL) and pauses during jailbreak (orchestrator has its own).
-        _driverWatchdog = new LibusbKWatchdog(_monitor, _settings, pollInterval: TimeSpan.FromSeconds(2));
-        _driverWatchdog.LogReceived += (_, line) => _logService.Append(line.Source, line.Message, line.IsError);
-        _driverWatchdog.Start();
-
-        Jailbreak.IsRunningChanged += OnJailbreakRunningChanged;
 
         if (_settings.CheckUpdates)
         {
@@ -65,6 +59,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public SettingsViewModel SettingsVm { get; }
 
     public AboutViewModel About { get; }
+
+    public HardwareOperationCoordinator HardwareOperations => _hardwareOperations;
+
+    public HardwareOperationState ActiveHardwareOperation => _hardwareOperations.Current;
+
+    public bool IsHardwareBusy => ActiveHardwareOperation.IsBusy;
 
     public RelayCommand RestartAsAdminCommand { get; }
 
@@ -123,7 +123,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateDeviceStatus(Core.Models.AppleUsbDevice device)
     {
-        if (Jailbreak.IsRunning)
+        if (_hardwareOperations.Current.IsBusy)
         {
             return;
         }
@@ -132,21 +132,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             StatusText = $"Device: {DeviceModeFormatting.GetLabel(device.Mode)} ({device.Name})";
         }
+        else
+        {
+            StatusText = "Ready";
+        }
+    }
+
+    private void OnHardwareOperationChanged(object? sender, HardwareOperationState state)
+    {
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        {
+            OnPropertyChanged(nameof(ActiveHardwareOperation));
+            OnPropertyChanged(nameof(IsHardwareBusy));
+            StatusText = state.IsBusy
+                ? $"{state.Operation}: {state.Detail ?? "hardware operation active"}"
+                : "Ready";
+        });
     }
 
     public void Dispose()
     {
-        Jailbreak.IsRunningChanged -= OnJailbreakRunningChanged;
-        _driverWatchdog.Dispose();
+        _hardwareOperations.StateChanged -= OnHardwareOperationChanged;
         Versions.Dispose();
         _logService.Dispose();
         _monitor.DeviceChanged -= OnDeviceChanged;
         _monitor.Dispose();
-    }
-
-    private void OnJailbreakRunningChanged(object? sender, bool isRunning)
-    {
-        // Pause the global watchdog during jailbreak — the orchestrator runs its own.
-        _driverWatchdog.IsPaused = isRunning;
     }
 }
