@@ -101,7 +101,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up MSYS2 MinGW64
-        uses: msys2/setup-msys2@4cacabe9519961bff7b6716d46e8b5e568be7700
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2 resolved by successful build 190
         with:
           msystem: MINGW64
           update: true
