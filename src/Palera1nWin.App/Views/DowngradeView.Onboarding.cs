@@ -16,9 +16,9 @@ public partial class DowngradeView
     private TextBlock? _coldBootOnboardingLocation;
     private Button? _openColdBootFolderButton;
 
-    protected override void OnInitialized(EventArgs e)
+    public override void OnApplyTemplate()
     {
-        base.OnInitialized(e);
+        base.OnApplyTemplate();
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(InjectWorkflowOnboarding));
     }
 
