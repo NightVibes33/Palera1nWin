@@ -47,29 +47,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public JailbreakViewModel Jailbreak { get; }
-
     public DeviceViewModel Device { get; }
-
     public VersionsViewModel Versions { get; }
-
     public SetupViewModel Setup { get; }
-
     public LogsViewModel Logs { get; }
-
     public SettingsViewModel SettingsVm { get; }
-
     public AboutViewModel About { get; }
-
     public HardwareOperationCoordinator HardwareOperations => _hardwareOperations;
-
     public HardwareOperationState ActiveHardwareOperation => _hardwareOperations.Current;
-
     public bool IsHardwareBusy => ActiveHardwareOperation.IsBusy;
-
     public RelayCommand RestartAsAdminCommand { get; }
-
     public RelayCommand OpenLogsFolderCommand { get; }
-
     public event Action<int>? NavigateRequested;
 
     public string StatusText
@@ -90,9 +78,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public void NavigateTo(int tabIndex) => NavigateRequested?.Invoke(tabIndex);
-
     public void SetStatusText(string text) => SetStatus(text);
-
     public void AppendLog(string source, string message, bool isError = false) =>
         _logService.Append(source, message, isError);
 
@@ -123,19 +109,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateDeviceStatus(Core.Models.AppleUsbDevice device)
     {
-        if (_hardwareOperations.Current.IsBusy)
-        {
-            return;
-        }
+        if (_hardwareOperations.Current.IsBusy) return;
 
-        if (device.IsPresent)
-        {
-            StatusText = $"Device: {DeviceModeFormatting.GetLabel(device.Mode)} ({device.Name})";
-        }
-        else
-        {
-            StatusText = "Ready";
-        }
+        StatusText = device.IsPresent
+            ? $"Device: {DeviceModeFormatting.GetLabel(device.Mode)} ({device.Name})"
+            : "Ready";
     }
 
     private void OnHardwareOperationChanged(object? sender, HardwareOperationState state)
@@ -153,9 +131,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _hardwareOperations.StateChanged -= OnHardwareOperationChanged;
+        Jailbreak.Dispose();
         Versions.Dispose();
-        _logService.Dispose();
         _monitor.DeviceChanged -= OnDeviceChanged;
         _monitor.Dispose();
+        _logService.Dispose();
     }
 }
