@@ -63,8 +63,8 @@ text = text.replace(
     'build_autotools "https://github.com/turdus-m3rula/libfragmentzip.git" 84e47176fee2d856c81f87f2caaa7aca2df679ae libfragmentzip',
     1,
 )
-old_idevice = '''git clone --depth 1 --branch sephaxx \\
-  https://github.com/turdus-m3rula/idevicerestore_fork.git \\
+old_idevice = '''git clone --depth 1 --branch sephaxx \
+  https://github.com/turdus-m3rula/idevicerestore_fork.git \
   "$BUILD/idevicerestore"'''
 new_idevice = '''git clone --no-tags https://github.com/turdus-m3rula/idevicerestore_fork.git "$BUILD/idevicerestore"
 git -C "$BUILD/idevicerestore" checkout --detach c2ad454aecc3354f3b1a15dcb4d4b4dc0e83b743
@@ -125,15 +125,50 @@ old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
 '''
-new_openra1n = '''sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
+new_openra1n = '''python - openra1n.c <<'PY_OPENRA1N'
+from pathlib import Path
+path = Path("openra1n.c")
+source = path.read_text(encoding="utf-8")
+old = '''int main(int argc, char **argv) {
+\tLOG_RAINBOW("-=-=- openra1n -=-=-");
+\tint ret = EXIT_FAILURE;
+\tusb_handle_t handle;
+\tusb_timeout = 5;
+\tusb_abort_timeout_min = 0;
+\tLOG_INFO("Waiting for DFU mode device");
+\tgaster_checkm8(&handle);
+\tsleep_ms(3000);
+\tcheckm8_boot_pongo(&handle);
+\treturn ret;
+}'''
+new = '''int main(int argc, char **argv) {
+\tLOG_RAINBOW("-=-=- openra1n -=-=-");
+\tusb_handle_t handle;
+\tusb_timeout = 5;
+\tusb_abort_timeout_min = 0;
+\tLOG_INFO("Waiting for DFU mode device");
+\tif(!gaster_checkm8(&handle)) {
+\t\tLOG_ERROR("checkm8 did not reach pwned DFU");
+\t\treturn EXIT_FAILURE;
+\t}
+\tsleep_ms(3000);
+\tcheckm8_boot_pongo(&handle);
+\tLOG_INFO("PongoOS payload sent; Windows may temporarily show the device as disconnected while 05AC:4141 enumerates");
+\treturn EXIT_SUCCESS;
+}'''
+if old not in source:
+    raise SystemExit("Pinned openra1n main function changed; refusing an unreviewed patch")
+path.write_text(source.replace(old, new, 1), encoding="utf-8", newline="\n")
+PY_OPENRA1N
+sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
 grep -q '^BIN = openra1n.exe$' Makefile
 make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
-gcc -std=c11 -O2 -Wall -Wextra -municode \\
-  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
-  -o "$STAGE/openra1n.exe" \\
+gcc -std=c11 -O2 -Wall -Wextra -municode \
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \
+  -o "$STAGE/openra1n.exe" \
   -lsetupapi
 '''
 if old_openra1n not in text:
@@ -159,7 +194,7 @@ from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 data = path.read_bytes()
-if len(data) < 65536 or not data.startswith(b"\\x7fELF"):
+if len(data) < 65536 or not data.startswith(b"\x7fELF"):
     raise SystemExit("Packaged palera1n runtime is not a valid ELF executable")
 PY_ELF
 
