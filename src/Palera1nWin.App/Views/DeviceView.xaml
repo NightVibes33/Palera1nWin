@@ -1,0 +1,103 @@
+<UserControl x:Class="Palera1nWin.App.Views.DeviceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" DataContext="{Binding Device}">
+    <StackPanel Margin="32,24,32,34" MaxWidth="1020" HorizontalAlignment="Left">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="Device" Style="{StaticResource Text.Title}"/>
+          <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
+                     Text="Live Apple USB detection, mode state, and Windows driver binding."/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+          <ui:Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="16,8" Margin="0,0,8,0"/>
+          <ui:Button Content="Open Zadig" Command="{Binding OpenZadigCommand}" Padding="16,8" Margin="0,0,8,0"/>
+          <ui:Button Content="Fix Windows Drivers" Appearance="Primary" Padding="18,8"
+                     Command="{Binding FixWindowsDriversCommand}"/>
+        </StackPanel>
+      </Grid>
+
+      <Border Style="{StaticResource Panel.Action}" Margin="0,22,0,0">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel>
+            <TextBlock Text="{Binding DeviceName}" FontSize="22" FontWeight="SemiBold"
+                       Foreground="{StaticResource Brush.Text}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding InstanceId}" Margin="0,8,30,0" FontSize="11.5"
+                       Foreground="{StaticResource Brush.TextTertiary}" TextWrapping="Wrap"
+                       FontFamily="Consolas, Cascadia Mono, Segoe UI"/>
+          </StackPanel>
+          <Border Grid.Column="1" Style="{StaticResource Badge}" Background="{Binding ModeBadgeBackground}"
+                  VerticalAlignment="Top">
+            <TextBlock Text="{Binding UsbMode}" FontSize="12" FontWeight="SemiBold"
+                       Foreground="{Binding ModeBadgeForeground}"/>
+          </Border>
+        </Grid>
+      </Border>
+
+      <Grid Margin="0,18,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Style="{StaticResource Panel.Card}" Margin="0,0,10,0">
+          <StackPanel>
+            <TextBlock Text="VID:PID" Style="{StaticResource Metric.Label}"/>
+            <TextBlock Text="{Binding VidPid}" Style="{StaticResource Metric.Value}"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Style="{StaticResource Panel.Card}" Margin="10,0,10,0">
+          <StackPanel>
+            <TextBlock Text="STATUS" Style="{StaticResource Metric.Label}"/>
+            <TextBlock Text="{Binding DeviceStatus}" Style="{StaticResource Metric.Value}"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Style="{StaticResource Panel.Card}" Margin="10,0,0,0">
+          <StackPanel>
+            <TextBlock Text="USBIPD BUS" Style="{StaticResource Metric.Label}"/>
+            <TextBlock Text="{Binding BusId}" Style="{StaticResource Metric.Value}"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Grid Margin="0,18,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="3*"/>
+          <ColumnDefinition Width="2*"/>
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Style="{StaticResource Panel.Card}" Margin="0,0,10,0">
+          <StackPanel>
+            <TextBlock Text="Driver service" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding DriverService}" Margin="0,8,0,0"
+                       Foreground="{StaticResource Brush.Accent}" FontSize="16"
+                       FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,10,0,0"
+                       Text="Normal and recovery should use Apple's driver. DFU and PongoOS should use the restore driver path while the exploit or restore stage is running."/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Style="{StaticResource Panel.Raised}" Margin="10,0,0,0">
+          <StackPanel>
+            <TextBlock Text="Driver repair" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Style="{StaticResource Text.Caption}" Margin="0,8,0,14"
+                       Text="Use this after a jailbreak or restore attempt if Apple Devices/iTunes no longer sees the device in normal mode."/>
+            <ui:Button Content="Fix Windows Drivers" Appearance="Primary" HorizontalAlignment="Left"
+                       Command="{Binding FixWindowsDriversCommand}"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <ui:InfoBar Margin="0,18,0,0" Severity="Informational" IsOpen="True" IsClosable="False"
+                  Title="Mode check"
+                  Message="DFU has a black screen. Recovery shows a cable/computer image. PongoOS appears after checkm8 and needs the Pongo driver before restore continues."/>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

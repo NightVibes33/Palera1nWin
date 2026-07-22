@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Palera1nWin.App/Palera1nWin.App.csproj" />
+    <Project Path="src/Palera1nWin.Core/Palera1nWin.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Palera1nWin.Core.Tests/Palera1nWin.Core.Tests.csproj" />
+  </Folder>
+</Solution>

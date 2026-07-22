@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <Product>Palera1nWin</Product>
+    <Authors>Palera1nWin Contributors</Authors>
+    <Company>Palera1nWin Contributors</Company>
+    <Copyright>© 2026 Palera1nWin Contributors. MIT License.</Copyright>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/pwnapplehat/Palera1nWin</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/pwnapplehat/Palera1nWin</PackageProjectUrl>
+    <NeutralLanguage>en</NeutralLanguage>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+</Project>

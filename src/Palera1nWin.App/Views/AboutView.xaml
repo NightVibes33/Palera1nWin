@@ -1,0 +1,31 @@
+<UserControl x:Class="Palera1nWin.App.Views.AboutView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" DataContext="{Binding About}">
+    <StackPanel Margin="28,20,28,28" MaxWidth="720" HorizontalAlignment="Left">
+      <TextBlock Text="About" Style="{StaticResource Text.Title}"/>
+      <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
+                 Text="Production Windows GUI for palera1n (hybrid openra1n + WSL)."/>
+
+      <ui:Card Margin="0,22,0,0" VerticalAlignment="Stretch">
+        <StackPanel>
+          <TextBlock Text="Palera1nWin" FontFamily="{StaticResource Font.Display}" FontSize="28"
+                     FontWeight="SemiBold" Foreground="{StaticResource Brush.Accent}"/>
+          <TextBlock Margin="0,4,0,0" Style="{StaticResource Text.Caption}">
+            <Run Text="Version"/>
+            <Run Text="{Binding VersionText, Mode=OneWay}"/>
+          </TextBlock>
+
+          <TextBlock Text="{Binding LicenseText}" Style="{StaticResource Text.Body}" Margin="0,16,0,0"/>
+
+          <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+            <ui:Button Content="palera.in" Command="{Binding OpenPalera1nSiteCommand}" Margin="0,0,8,0"/>
+            <ui:Button Content="Palera1nWin on GitHub" Command="{Binding OpenGitHubCommand}" Margin="0,0,8,0"/>
+            <ui:Button Content="palera1n project" Appearance="Transparent" Command="{Binding OpenPalera1nRepoCommand}"/>
+          </StackPanel>
+        </StackPanel>
+      </ui:Card>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

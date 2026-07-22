@@ -1,0 +1,96 @@
+[31m-[32m=[33m-[34m=[35m-[36m [31mo[32mp[33me[34mn[35mr[36ma[31m1[32mn[33m [34m-[35m=[36m-[31m=[32m-[0m
+[37m[INFO] (openra1n.c:1058)[90m --> [37mWaiting for DFU mode device[0m
+[31m[ERROR] (openra1n.c:1040)[90m --> [37mStage 1 failed[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 1 succeeded[0m
+[37m[INFO] (openra1n.c:1026)[90m --> [37mSetting up the exploit (this is the heap spray)[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 2 succeeded[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 3 succeeded[0m
+[37m[INFO] (openra1n.c:1033)[90m --> [37mRight before trigger (this is the real bug setup)[0m
+[36m[DEBUG] (openra1n.c:883)[90m --> [37msetting up stage 2 for s8003[0m
+[36m[DEBUG] (openra1n.c:929)[90m --> [37msuccessfully leaked data[0m
+[36m[DEBUG] (openra1n.c:935)[90m --> [37mi = 0[0m
+[36m[DEBUG] (openra1n.c:935)[90m --> [37mi = 1[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 0 succeeded[0m
+[37m[INFO] (openra1n.c:961)[90m --> [37mBooting pongoOS[0m
+[36m[DEBUG] (openra1n.c:962)[90m --> [37mCompressing pongoOS[0m
+[36m[DEBUG] (openra1n.c:963)[90m --> [37mAppending shellcode to the top of pongoOS (512 bytes)[0m
+[36m[DEBUG] (openra1n.c:969)[90m --> [37mCompressed pongoOS from 254224 to 147895 bytes[0m
+[36m[DEBUG] (openra1n.c:977)[90m --> [37mSetting the compressed size into the shellcode[0m
+[36m[DEBUG] (openra1n.c:979)[90m --> [37msize = 0x2421B[0m
+[36m[DEBUG] (openra1n.c:981)[90m --> [37msize = 0x241B7[0m
+[36m[DEBUG] (openra1n.c:982)[90m --> [37mReconnecting to device[0m
+[36m[DEBUG] (openra1n.c:984)[90m --> [37mWaiting for device to be ready[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 2048[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 4096[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 6144[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 8192[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 10240[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 12288[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 14336[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 16384[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 18432[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 20480[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 22528[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 24576[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 26624[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 28672[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 30720[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 32768[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 34816[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 36864[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 38912[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 40960[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 43008[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 45056[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 47104[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 49152[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 51200[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 53248[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 55296[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 57344[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 59392[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 61440[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 63488[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 65536[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 67584[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 69632[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 71680[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 73728[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 75776[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 77824[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 79872[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 81920[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 83968[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 86016[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 88064[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 90112[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 92160[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 94208[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 96256[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 98304[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 100352[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 102400[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 104448[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 106496[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 108544[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 110592[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 112640[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 114688[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 116736[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 118784[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 120832[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 122880[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 124928[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 126976[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 129024[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 131072[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 133120[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 135168[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 137216[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 139264[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 141312[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 143360[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 145408[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 147456[0m
+[36m[DEBUG] (openra1n.c:1001)[90m --> [37mlen = 148407[0m
+[36m[DEBUG] (openra1n.c:1005)[90m --> [37mpongoOS sent, should be booting[0m

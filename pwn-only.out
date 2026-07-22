@@ -1,0 +1,13 @@
+[31m-[32m=[33m-[34m=[35m-[36m [31mo[32mp[33me[34mn[35mr[36ma[31m1[32mn[33m [34m-[35m=[36m-[31m=[32m-[0m
+[37m[INFO] (openra1n.c:1058)[90m --> [37mWaiting for DFU mode device[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 1 succeeded[0m
+[37m[INFO] (openra1n.c:1026)[90m --> [37mSetting up the exploit (this is the heap spray)[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 2 succeeded[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 3 succeeded[0m
+[37m[INFO] (openra1n.c:1033)[90m --> [37mRight before trigger (this is the real bug setup)[0m
+[36m[DEBUG] (openra1n.c:883)[90m --> [37msetting up stage 2 for s8003[0m
+[36m[DEBUG] (openra1n.c:929)[90m --> [37msuccessfully leaked data[0m
+[36m[DEBUG] (openra1n.c:935)[90m --> [37mi = 0[0m
+[36m[DEBUG] (openra1n.c:935)[90m --> [37mi = 1[0m
+[36m[DEBUG] (openra1n.c:1038)[90m --> [37mStage 0 succeeded[0m
+[37m[INFO] (openra1n.c:1061)[90m --> [37mPwned DFU ready; leaving the device in DFU mode[0m

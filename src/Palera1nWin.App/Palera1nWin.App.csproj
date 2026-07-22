@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Palera1nWin.App</RootNamespace>
+    <AssemblyName>Palera1nWin</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Description>Palera1nWin — Windows GUI for palera1n jailbreak and DarkSword iPad 5 downgrade workflows.</Description>
+    <ApplicationIcon Condition="Exists('..\..\assets\icon.ico')">..\..\assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Palera1nWin.Core\Palera1nWin.Core.csproj" />
+    <ProjectReference Include="..\..\DarkSwordRestore\src\DarkSwordRestore.Core\DarkSwordRestore.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('..\..\assets\icon.png')">
+    <Resource Include="..\..\assets\icon.png" Link="Assets\icon.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\native')">
+    <Content Include="$(MSBuildThisFileDirectory)..\..\native\**\*">
+      <Link>native\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>native\</PackagePath>
+    </Content>
+  </ItemGroup>
+</Project>
