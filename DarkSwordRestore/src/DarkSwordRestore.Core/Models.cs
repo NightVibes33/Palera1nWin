@@ -106,6 +106,9 @@ public sealed record ToolResult(
     TimeSpan Duration)
 {
     public bool Success => ExitCode == 0;
+    public string CombinedOutput => string.IsNullOrWhiteSpace(StandardError)
+        ? StandardOutput
+        : StandardOutput + Environment.NewLine + StandardError;
 }
 
 public sealed record RestoreSession(
