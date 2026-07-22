@@ -25,6 +25,7 @@ public sealed class IpswInspectorTests
                 Write(archive, "Firmware/dfu/iBSS.ipad.RELEASE.im4p", "ibss");
                 Write(archive, "Firmware/dfu/iBEC.ipad.RELEASE.im4p", "ibec");
                 Write(archive, "Firmware/all_flash/sep-firmware.ipad.RELEASE.im4p", "sep");
+                AddRestoreStructure(archive);
             }
 
             var result = await new IpswInspector().InspectAsync(path);
@@ -62,6 +63,7 @@ public sealed class IpswInspectorTests
                 Write(archive, "Firmware/dfu/iBSS.test", "ibss");
                 Write(archive, "Firmware/dfu/iBEC.test", "ibec");
                 Write(archive, "Firmware/sep-firmware.test", "sep");
+                AddRestoreStructure(archive);
             }
 
             var result = await new IpswInspector().InspectAsync(path);
@@ -97,6 +99,7 @@ public sealed class IpswInspectorTests
                 Write(archive, "Firmware/dfu/iBSS.test", "ibss");
                 Write(archive, "Firmware/dfu/iBEC.test", "ibec");
                 Write(archive, "Firmware/sep-firmware.test", "sep");
+                AddRestoreStructure(archive);
             }
 
             var result = await new IpswInspector().InspectAsync(path);
@@ -108,6 +111,12 @@ public sealed class IpswInspectorTests
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    private static void AddRestoreStructure(ZipArchive archive)
+    {
+        for (var index = 0; index < 8; index++)
+            Write(archive, $"Firmware/all_flash/fixture-{index:D2}.im4p", $"fixture-{index}");
     }
 
     private static void Write(ZipArchive archive, string name, string content)
