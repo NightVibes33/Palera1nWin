@@ -6,80 +6,59 @@ public sealed class WslService
 {
     private readonly string _preferredDistro;
 
-    public WslService(string preferredDistro = "Ubuntu")
-    {
-        _preferredDistro = preferredDistro;
-    }
+    public WslService(string preferredDistro = "Ubuntu") =>
+        _preferredDistro = string.IsNullOrWhiteSpace(preferredDistro) ? "Ubuntu" : preferredDistro.Trim();
 
     public async Task<string?> ResolveDistroAsync(CancellationToken cancellationToken = default)
     {
         var result = await ProcessRunner.RunAsync(
             "wsl.exe",
             new[] { "--list", "--quiet" },
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken,
+            timeout: TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        if (!result.Succeeded) return null;
 
-        // wsl.exe --list emits UTF-16LE on Windows; ProcessRunner decodes as UTF-8,
-        // so every ASCII char is followed by a NUL byte. Strip ALL NULs, not just ends.
-        var distros = result.StandardOutput
-            .Replace("\0", "", StringComparison.Ordinal)
+        var distros = result.StandardOutput.Replace("\0", "", StringComparison.Ordinal)
             .Split('\n', '\r')
-            .Select(line => line.Trim())
+            .Select(line => line.Trim().TrimStart('*').Trim())
             .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        if (distros.Count == 0) return null;
 
-        if (distros.Count == 0)
-        {
-            return null;
-        }
-
-        var match = distros.FirstOrDefault(d =>
-            string.Equals(d, _preferredDistro, StringComparison.OrdinalIgnoreCase));
-
-        return match ?? distros[0];
+        return distros.FirstOrDefault(d => string.Equals(d, _preferredDistro, StringComparison.OrdinalIgnoreCase))
+               ?? distros.FirstOrDefault(d => d.StartsWith(_preferredDistro + "-", StringComparison.OrdinalIgnoreCase))
+               ?? distros[0];
     }
 
     public async Task EnsureVhciModuleAsync(string? distro = null, CancellationToken cancellationToken = default)
     {
         distro ??= await ResolveDistroAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(distro))
-        {
-            throw new InvalidOperationException("No WSL distro available.");
-        }
-
-        await RunRootCommandAsync(
-            "modprobe vhci-hcd 2>/dev/null || true",
-            distro,
-            cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(distro)) throw new InvalidOperationException("No WSL distro available.");
+        await RunRootCommandAsync("modprobe vhci-hcd 2>/dev/null || true", distro, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<ProcessResult> RunCommandAsync(
         string command,
         string? distro = null,
-        CancellationToken cancellationToken = default)
-    {
-        return RunDistroCommandAsync(distro, command, asRoot: false, cancellationToken);
-    }
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null) =>
+        RunDistroCommandAsync(distro, command, asRoot: false, cancellationToken, timeout);
 
     public Task<ProcessResult> RunRootCommandAsync(
         string command,
         string? distro = null,
-        CancellationToken cancellationToken = default)
-    {
-        return RunDistroCommandAsync(distro, command, asRoot: true, cancellationToken);
-    }
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null) =>
+        RunDistroCommandAsync(distro, command, asRoot: true, cancellationToken, timeout);
 
-    /// <summary>
-    /// True when WSL lsusb reports any Apple Inc. device (VID 05ac).
-    /// </summary>
-    public async Task<bool> HasAppleUsbDeviceAsync(
-        string? distro = null,
-        CancellationToken cancellationToken = default)
+    public async Task<bool> HasAppleUsbDeviceAsync(string? distro = null, CancellationToken cancellationToken = default)
     {
         var result = await RunCommandAsync(
-            "lsusb 2>/dev/null | grep -i '05ac:' || true",
+            "timeout 5s lsusb 2>/dev/null | grep -i '05ac:' || true",
             distro,
-            cancellationToken).ConfigureAwait(false);
-
+            cancellationToken,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         return result.StandardOutput.Contains("05ac:", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -87,27 +66,19 @@ public sealed class WslService
         string? distro,
         string command,
         bool asRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout)
     {
         distro ??= await ResolveDistroAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(distro))
-        {
-            throw new InvalidOperationException("No WSL distro available.");
-        }
+        if (string.IsNullOrWhiteSpace(distro)) throw new InvalidOperationException("No WSL distro available.");
 
         var args = new List<string> { "-d", distro };
-        if (asRoot)
-        {
-            args.Add("-u");
-            args.Add("root");
-        }
-
-        args.Add("--");
-        args.Add("bash");
-        args.Add("-lc");
-        args.Add(command);
-
-        return await ProcessRunner.RunAsync("wsl.exe", args, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        if (asRoot) args.AddRange(["-u", "root"]);
+        args.AddRange(["--", "bash", "-lc", command]);
+        return await ProcessRunner.RunAsync(
+            "wsl.exe",
+            args,
+            cancellationToken: cancellationToken,
+            timeout: timeout ?? TimeSpan.FromMinutes(10)).ConfigureAwait(false);
     }
 }
