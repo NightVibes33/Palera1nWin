@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Util;
 
 namespace Palera1nWin.Core.Services;
@@ -15,33 +16,24 @@ public enum UsbipdAttachState
 public sealed class UsbipdAppleDevice
 {
     public required string BusId { get; init; }
-
     public required string VidPid { get; init; }
-
     public required UsbipdAttachState State { get; init; }
-
     public required string RawLine { get; init; }
 }
 
 public sealed class WslAttachResult
 {
     public bool Succeeded { get; init; }
-
     public string? BusId { get; init; }
-
     public string Message { get; init; } = string.Empty;
-
     public bool UsbDkDetected { get; init; }
-
     public bool SeenInWsl { get; init; }
 }
 
 public sealed class AppleHostReleaseResult
 {
     public bool Succeeded { get; init; }
-
     public string Message { get; init; } = string.Empty;
-
     public string? Detail { get; init; }
 }
 
@@ -49,388 +41,232 @@ public sealed class UsbipdService
 {
     public string? ExecutablePath { get; }
 
-    public UsbipdService(string? executablePath = null)
-    {
+    public UsbipdService(string? executablePath = null) =>
         ExecutablePath = executablePath ?? ResolveExecutable();
-    }
 
     public bool IsAvailable => !string.IsNullOrWhiteSpace(ExecutablePath) && File.Exists(ExecutablePath);
+    public string ListDevices() => Invoke("list");
+    public bool DetectsUsbDkConflict() => ListDevices().Contains("UsbDk", StringComparison.OrdinalIgnoreCase);
+    public string Bind(string busId, bool force = false) =>
+        force ? Invoke("bind", "--busid", busId, "--force") : Invoke("bind", "--busid", busId);
+    public string AttachWsl(string busId, string distro = "Ubuntu") =>
+        Invoke("attach", "--wsl", distro, "--busid", busId);
+    public string Detach(string busId) => Invoke("detach", "--busid", busId);
+    public string Unbind(string busId) => Invoke("unbind", "--busid", busId);
 
-    public string ListDevices()
-    {
-        return Invoke("list");
-    }
+    public string? FindAppleBusId() => FindAppleDevice()?.BusId;
 
-    public bool DetectsUsbDkConflict()
+    /// <summary>
+    /// Returns a device only when selection is unambiguous. With no bus id, multiple
+    /// connected Apple devices intentionally return null instead of selecting the first.
+    /// </summary>
+    public UsbipdAppleDevice? FindAppleDevice(string? busId = null, string? vidPid = null)
     {
-        var output = ListDevices();
-        return output.Contains("UsbDk", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public string Bind(string busId, bool force = false)
-    {
-        return force
-            ? Invoke("bind", "--busid", busId, "--force")
-            : Invoke("bind", "--busid", busId);
-    }
-
-    public string AttachWsl(string busId, string distro = "Ubuntu")
-    {
-        return Invoke("attach", "--wsl", distro, "--busid", busId);
-    }
-
-    public string? FindAppleBusId()
-    {
-        return FindAppleDevice()?.BusId;
-    }
-
-    public UsbipdAppleDevice? FindAppleDevice()
-    {
-        return ParseAppleDevices(ListDevices()).FirstOrDefault();
-    }
-
-    public string Detach(string busId)
-    {
-        return Invoke("detach", "--busid", busId);
-    }
-
-    public string Unbind(string busId)
-    {
-        return Invoke("unbind", "--busid", busId);
+        var devices = ParseAppleDevices(ListDevices());
+        if (!string.IsNullOrWhiteSpace(busId))
+            devices = devices.Where(device => string.Equals(device.BusId, busId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (!string.IsNullOrWhiteSpace(vidPid))
+            devices = devices.Where(device => string.Equals(device.VidPid, vidPid, StringComparison.OrdinalIgnoreCase)).ToArray();
+        return devices.Count == 1 ? devices[0] : null;
     }
 
     public string DetachAll()
     {
-        var output = ListDevices();
-        var busIds = ParseBusIds(output);
-        var combined = new List<string>();
-
-        foreach (var busId in busIds)
-        {
-            combined.Add(Detach(busId));
-        }
-
-        return string.Join(Environment.NewLine, combined.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var devices = ParseAppleDevices(ListDevices());
+        if (devices.Count > 1)
+            return "Refusing DetachAll: multiple Apple devices are connected. Select an exact bus id.";
+        return devices.Count == 1 ? Detach(devices[0].BusId) : string.Empty;
     }
 
-    /// <summary>
-    /// Detach + unbind Apple USB so Windows owns the device again (libusbK/openra1n).
-    /// Detach alone leaves the VBoxUSB stub bound — openra1n then crashes after YOLO.
-    /// Unbind requires Administrator; elevates via UAC when needed.
-    /// </summary>
-    public AppleHostReleaseResult ReleaseAppleToHost()
+    public AppleHostReleaseResult ReleaseAppleToHost(string? targetBusId = null)
     {
-        var output = ListDevices();
-        var apple = ParseAppleDevices(output).ToList();
-        var messages = new List<string>();
-        var busIds = apple.Select(d => d.BusId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (!IsAvailable)
+            return new AppleHostReleaseResult { Succeeded = true, Message = "usbipd-win is not installed; Windows already owns the device." };
 
-        if (busIds.Count == 0)
-        {
-            // Fallback: only bus IDs on lines that mention Apple VID.
-            foreach (var line in output.Split('\n', '\r'))
-            {
-                if (!line.Contains("05ac:", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+        var beforeText = ListDevices();
+        var all = ParseAppleDevices(beforeText);
+        var targets = string.IsNullOrWhiteSpace(targetBusId)
+            ? all
+            : all.Where(device => string.Equals(device.BusId, targetBusId, StringComparison.OrdinalIgnoreCase)).ToArray();
 
-                var parts = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length > 0 && parts[0].Contains('-', StringComparison.Ordinal))
-                {
-                    busIds.Add(parts[0]);
-                }
-            }
-
-            busIds = busIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        }
-
-        if (busIds.Count == 0)
-        {
-            return new AppleHostReleaseResult
-            {
-                Succeeded = true,
-                Message = "No Apple usbipd device to release.",
-            };
-        }
-
-        var needsElevation = false;
-        foreach (var busId in busIds)
-        {
-            var detachOut = Detach(busId);
-            messages.Add($"detach {busId}: {Truncate(detachOut)}");
-            if (IsAccessDenied(detachOut))
-            {
-                needsElevation = true;
-            }
-
-            var unbindOut = Unbind(busId);
-            messages.Add($"unbind {busId}: {Truncate(unbindOut)}");
-            if (IsAccessDenied(unbindOut))
-            {
-                needsElevation = true;
-            }
-            else
-            {
-                messages.Add($"released {busId}");
-            }
-        }
-
-        if (needsElevation && !Elevation.IsAdmin() && ExecutablePath is not null)
-        {
-            messages.Add("usbipd detach/unbind needs Administrator — prompting UAC...");
-            foreach (var busId in busIds)
-            {
-                Elevation.RunElevatedWait(ExecutablePath, new[] { "detach", "--busid", busId }, TimeSpan.FromSeconds(30));
-                var ok = Elevation.RunElevatedWait(
-                    ExecutablePath,
-                    new[] { "unbind", "--busid", busId },
-                    TimeSpan.FromSeconds(30));
-                messages.Add(ok
-                    ? $"elevated unbind {busId}: ok"
-                    : $"elevated unbind {busId}: failed or UAC cancelled");
-            }
-        }
-        else if (!Elevation.IsAdmin() && ExecutablePath is not null)
-        {
-            // Non-elevated path may return empty errors; if still Shared, force elevated unbind.
-            var mid = ListDevices();
-            var stillBound = ParseAppleDevices(mid)
-                .Any(d => d.State is UsbipdAttachState.Shared or UsbipdAttachState.Attached or UsbipdAttachState.Error);
-            if (stillBound)
-            {
-                messages.Add("Apple still Shared/Attached — prompting UAC for usbipd unbind...");
-                foreach (var busId in busIds)
-                {
-                    Elevation.RunElevatedWait(ExecutablePath, new[] { "detach", "--busid", busId }, TimeSpan.FromSeconds(30));
-                    var ok = Elevation.RunElevatedWait(
-                        ExecutablePath,
-                        new[] { "unbind", "--busid", busId },
-                        TimeSpan.FromSeconds(30));
-                    messages.Add(ok
-                        ? $"elevated unbind {busId}: ok"
-                        : $"elevated unbind {busId}: failed or UAC cancelled");
-                }
-            }
-        }
-
-        // Verify: only fail if usbipd still shows Shared/Attached/Error.
-        // Also treat PnP VBoxUSB as still-bound even if list parsing is stale.
-        var after = ListDevices();
-        var appleAfter = ParseAppleDevices(after);
-        var stillSharedOrAttached = appleAfter
-            .Any(d => d.State is UsbipdAttachState.Shared or UsbipdAttachState.Attached or UsbipdAttachState.Error);
-
-        if (stillSharedOrAttached)
-        {
+        if (targets.Count == 0)
+            return new AppleHostReleaseResult { Succeeded = true, Message = "The selected Apple USB device is not bound through usbipd.", Detail = beforeText };
+        if (string.IsNullOrWhiteSpace(targetBusId) && targets.Count != 1)
             return new AppleHostReleaseResult
             {
                 Succeeded = false,
-                Message =
-                    "Apple USB is still Shared/Attached under usbipd (VBoxUSB stub). " +
-                    "Relaunch Palera1nWin as Administrator, then retry." +
-                    Environment.NewLine +
-                    string.Join(Environment.NewLine, messages) +
-                    Environment.NewLine +
-                    string.Join(Environment.NewLine, appleAfter.Select(d => d.RawLine)),
-                Detail = after,
+                Message = $"Refusing to detach/unbind {targets.Count} Apple devices. Disconnect all but the target device.",
+                Detail = beforeText,
             };
+
+        var target = targets.Single();
+        var messages = new List<string>();
+        var detach = Detach(target.BusId);
+        messages.Add($"detach {target.BusId}: {Truncate(detach)}");
+        var unbind = Unbind(target.BusId);
+        messages.Add($"unbind {target.BusId}: {Truncate(unbind)}");
+
+        if ((IsAccessDenied(detach) || IsAccessDenied(unbind)) && !Elevation.IsAdmin() && ExecutablePath is not null)
+        {
+            messages.Add("usbipd requires Administrator; requesting elevation for the selected bus only.");
+            _ = Elevation.RunElevatedWait(ExecutablePath, new[] { "detach", "--busid", target.BusId }, TimeSpan.FromSeconds(30));
+            var elevated = Elevation.RunElevatedWait(ExecutablePath, new[] { "unbind", "--busid", target.BusId }, TimeSpan.FromSeconds(30));
+            messages.Add(elevated ? "elevated unbind: ok" : "elevated unbind: failed or UAC cancelled");
         }
 
+        var afterText = ListDevices();
+        var after = ParseAppleDevices(afterText)
+            .FirstOrDefault(device => string.Equals(device.BusId, target.BusId, StringComparison.OrdinalIgnoreCase));
+        var stillBound = after?.State is UsbipdAttachState.Shared or UsbipdAttachState.Attached or UsbipdAttachState.Error;
         return new AppleHostReleaseResult
         {
-            Succeeded = true,
-            Message = string.Join(Environment.NewLine, messages.Append($"usbipd Apple state OK ({appleAfter.Count} device(s))")),
-            Detail = after,
+            Succeeded = !stillBound,
+            Message = stillBound
+                ? $"Apple USB {target.BusId} is still owned by usbipd. Run Palera1nWin as Administrator.\n{string.Join(Environment.NewLine, messages)}"
+                : $"Apple USB {target.BusId} released to Windows.\n{string.Join(Environment.NewLine, messages)}",
+            Detail = afterText,
         };
     }
 
-    private static bool IsAccessDenied(string output) =>
-        output.Contains("Access denied", StringComparison.OrdinalIgnoreCase) ||
-        output.Contains("administrator", StringComparison.OrdinalIgnoreCase);
-
-    private static string Truncate(string text, int max = 160)
-    {
-        var t = text.Trim().Replace("\r", " ").Replace("\n", " ");
-        return t.Length <= max ? t : t[..max] + "...";
-    }
-
+    /// <summary>
+    /// Legacy bridge cleanup is restricted to a PID file created by this application.
+    /// It never scans and kills unrelated PowerShell processes by command-line text.
+    /// </summary>
     public static void KillLeftoverUsbBridges()
     {
+        var pidPath = Path.Combine(AppSettings.RuntimeDirectory, "usb-bridge.pid");
         try
         {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='powershell.exe' OR Name='pwsh.exe'");
-            foreach (var obj in searcher.Get())
+            if (!File.Exists(pidPath)) return;
+            var text = File.ReadAllText(pidPath).Trim();
+            if (int.TryParse(text, out var pid))
             {
-                var cmd = obj["CommandLine"]?.ToString() ?? string.Empty;
-                if (!cmd.Contains("usb-bridge.ps1", StringComparison.OrdinalIgnoreCase) &&
-                    !cmd.Contains("pln-bridge", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var pid = Convert.ToInt32(obj["ProcessId"]);
                 try
                 {
-                    System.Diagnostics.Process.GetProcessById(pid).Kill(entireProcessTree: true);
+                    using var process = System.Diagnostics.Process.GetProcessById(pid);
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(3000);
                 }
-                catch
-                {
-                    // Ignore.
-                }
+                catch { }
             }
+            File.Delete(pidPath);
         }
-        catch
-        {
-            // Best effort.
-        }
+        catch { }
     }
 
-    /// <summary>
-    /// Force-bind + attach Apple USB into WSL and verify it appears in lsusb.
-    /// This is what unblocks palera1n "Waiting for devices" on Windows.
-    /// </summary>
     public async Task<WslAttachResult> EnsureAppleAttachedToWslAsync(
         string distro,
         WslService wsl,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        string? targetBusId = null)
     {
         if (!IsAvailable)
-        {
-            return new WslAttachResult
-            {
-                Succeeded = false,
-                Message = "usbipd-win is not installed or not on PATH.",
-            };
-        }
+            return new WslAttachResult { Succeeded = false, Message = "usbipd-win is not installed or not on PATH." };
 
         var usbDk = DetectsUsbDkConflict();
-        if (usbDk)
-        {
-            progress?.Report(
-                "UsbDk filter detected - usbipd requires bind --force. Uninstall UsbDk if attach keeps failing.");
-        }
-
+        if (usbDk) progress?.Report("UsbDk filter detected. Uninstall it and reboot if attach fails.");
         await wsl.EnsureVhciModuleAsync(distro, cancellationToken).ConfigureAwait(false);
 
         var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromMinutes(3));
-        string? lastBusId = null;
-        var attempt = 0;
-
+        string? lastBusId = targetBusId;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            attempt++;
+            var devices = ParseAppleDevices(ListDevices());
+            UsbipdAppleDevice? apple;
+            if (!string.IsNullOrWhiteSpace(targetBusId))
+            {
+                apple = devices.FirstOrDefault(device => string.Equals(device.BusId, targetBusId, StringComparison.OrdinalIgnoreCase));
+            }
+            else if (devices.Count == 1)
+            {
+                apple = devices[0];
+                targetBusId = apple.BusId;
+            }
+            else if (devices.Count > 1)
+            {
+                return new WslAttachResult
+                {
+                    Succeeded = false,
+                    Message = $"Refusing usbipd attach: {devices.Count} Apple devices are connected. Disconnect all but the target.",
+                    UsbDkDetected = usbDk,
+                };
+            }
+            else
+            {
+                apple = null;
+            }
 
-            var apple = FindAppleDevice();
             if (apple is null)
             {
-                progress?.Report("No Apple USB device in usbipd list. Plug the phone in (Recovery/DFU/Normal).");
-                await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
+                progress?.Report("Waiting for the selected Apple USB device to appear in usbipd...");
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
             lastBusId = apple.BusId;
             progress?.Report($"Apple USB {apple.BusId} {apple.VidPid} state={apple.State}");
+            if (apple.State == UsbipdAttachState.Attached &&
+                await wsl.HasAppleUsbDeviceAsync(distro, cancellationToken).ConfigureAwait(false))
+            {
+                return Success(apple.BusId, usbDk);
+            }
 
             if (apple.State == UsbipdAttachState.Attached)
             {
-                if (await wsl.HasAppleUsbDeviceAsync(distro, cancellationToken).ConfigureAwait(false))
-                {
-                    return new WslAttachResult
-                    {
-                        Succeeded = true,
-                        BusId = apple.BusId,
-                        Message = $"Apple USB {apple.BusId} attached and visible in WSL.",
-                        UsbDkDetected = usbDk,
-                        SeenInWsl = true,
-                    };
-                }
-
-                progress?.Report(
-                    $"usbipd says Attached but WSL lsusb has no 05ac - detaching and retrying (attempt {attempt})...");
                 Detach(apple.BusId);
-                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(750, cancellationToken).ConfigureAwait(false);
             }
 
-            // Always force-bind when UsbDk is present; also force on retries after Shared-but-not-attached.
-            progress?.Report($"usbipd bind --force --busid {apple.BusId}");
-            var bindOut = Bind(apple.BusId, force: true);
-            if (!string.IsNullOrWhiteSpace(bindOut))
-            {
-                progress?.Report(bindOut.Trim());
-            }
-
-            if (bindOut.Contains("Access denied", StringComparison.OrdinalIgnoreCase) ||
-                bindOut.Contains("administrator", StringComparison.OrdinalIgnoreCase))
-            {
+            var bindOutput = Bind(apple.BusId, force: true);
+            progress?.Report(Truncate(bindOutput));
+            if (IsAccessDenied(bindOutput))
                 return new WslAttachResult
                 {
                     Succeeded = false,
                     BusId = apple.BusId,
-                    Message =
-                        "usbipd bind requires Administrator. Relaunch Palera1nWin as admin, then retry.",
+                    Message = "usbipd bind requires Administrator.",
                     UsbDkDetected = usbDk,
                 };
-            }
 
-            await Task.Delay(800, cancellationToken).ConfigureAwait(false);
-
-            progress?.Report($"usbipd attach --wsl {distro} --busid {apple.BusId}");
-            var attachOut = AttachWsl(apple.BusId, distro);
-            if (!string.IsNullOrWhiteSpace(attachOut))
+            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            var attachOutput = AttachWsl(apple.BusId, distro);
+            progress?.Report(Truncate(attachOutput));
+            if (attachOutput.Contains("error state", StringComparison.OrdinalIgnoreCase) ||
+                attachOutput.Contains("Device busy", StringComparison.OrdinalIgnoreCase) ||
+                attachOutput.Contains("used by Windows", StringComparison.OrdinalIgnoreCase))
             {
-                progress?.Report(attachOut.Trim());
-            }
-
-            if (attachOut.Contains("error state", StringComparison.OrdinalIgnoreCase) ||
-                attachOut.Contains("Device busy", StringComparison.OrdinalIgnoreCase) ||
-                attachOut.Contains("used by Windows", StringComparison.OrdinalIgnoreCase))
-            {
-                progress?.Report(
-                    "Attach failed (error/busy). UNPLUG the Lightning cable, wait 2s, PLUG back in. " +
-                    "If this repeats, uninstall UsbDk and reboot.");
-                await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
-            // Wait for WSL visibility after attach / re-enumeration.
             var visibleDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(12);
             while (DateTimeOffset.UtcNow < visibleDeadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (await wsl.HasAppleUsbDeviceAsync(distro, cancellationToken).ConfigureAwait(false))
-                {
-                    return new WslAttachResult
-                    {
-                        Succeeded = true,
-                        BusId = apple.BusId,
-                        Message = $"Apple USB {apple.BusId} attached and visible in WSL.",
-                        UsbDkDetected = usbDk,
-                        SeenInWsl = true,
-                    };
-                }
-
-                await Task.Delay(750, cancellationToken).ConfigureAwait(false);
+                    return Success(apple.BusId, usbDk);
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
             }
-
-            progress?.Report(
-                "Still not visible in WSL after attach. Unplug/replug now so the stub driver re-enumerates.");
-            await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
         }
 
         return new WslAttachResult
         {
             Succeeded = false,
             BusId = lastBusId,
-            Message =
-                "Timed out attaching Apple USB to WSL. Uninstall UsbDk if present, run as Administrator, " +
-                "then unplug/replug and retry.",
+            Message = "Timed out attaching the selected Apple USB device to WSL.",
             UsbDkDetected = usbDk,
-            SeenInWsl = false,
+        };
+
+        static WslAttachResult Success(string busId, bool conflict) => new()
+        {
+            Succeeded = true,
+            BusId = busId,
+            Message = $"Apple USB {busId} attached and visible in WSL.",
+            UsbDkDetected = conflict,
+            SeenInWsl = true,
         };
     }
 
@@ -440,19 +276,10 @@ public sealed class UsbipdService
         foreach (var segment in pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var candidate = Path.Combine(segment, "usbipd.exe");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
+            if (File.Exists(candidate)) return candidate;
         }
-
         var fixedPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "usbipd-win", "usbipd.exe");
-        if (File.Exists(fixedPath))
-        {
-            return fixedPath;
-        }
-
-        return null;
+        return File.Exists(fixedPath) ? fixedPath : null;
     }
 
     internal static IReadOnlyList<UsbipdAppleDevice> ParseAppleDevices(string listOutput)
@@ -461,108 +288,47 @@ public sealed class UsbipdService
         foreach (var line in listOutput.Split('\n', '\r'))
         {
             var trimmed = line.Trim();
-            if (trimmed.Length == 0)
-            {
-                continue;
-            }
-
-            if (!trimmed.Contains("05ac:", StringComparison.OrdinalIgnoreCase) &&
-                !trimmed.Contains("05AC:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
+            if (!trimmed.Contains("05ac:", StringComparison.OrdinalIgnoreCase)) continue;
             var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length < 2 || !parts[0].Contains('-', StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var state = ParseUsbipdState(trimmed);
-
+            if (parts.Length < 2 || !Regex.IsMatch(parts[0], @"^\d+-\d+(?:\.\d+)*$")) continue;
             devices.Add(new UsbipdAppleDevice
             {
                 BusId = parts[0],
                 VidPid = parts[1],
-                State = state,
+                State = ParseUsbipdState(trimmed),
                 RawLine = trimmed,
             });
         }
-
         return devices;
     }
 
-    /// <summary>
-    /// usbipd STATE column. Must check "Not shared" before "Shared" — otherwise
-    /// "Not shared" is misclassified as Shared (substring match).
-    /// </summary>
     internal static UsbipdAttachState ParseUsbipdState(string line)
     {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return UsbipdAttachState.NotFound;
-        }
-
-        if (line.Contains("Not shared", StringComparison.OrdinalIgnoreCase))
-        {
-            return UsbipdAttachState.NotShared;
-        }
-
-        if (line.Contains("Attached", StringComparison.OrdinalIgnoreCase))
-        {
-            return UsbipdAttachState.Attached;
-        }
-
-        // Match whole word Shared (STATE column), not substrings of other words.
-        if (Regex.IsMatch(line, @"\bShared\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-        {
-            return UsbipdAttachState.Shared;
-        }
-
-        if (line.Contains("error", StringComparison.OrdinalIgnoreCase))
-        {
-            return UsbipdAttachState.Error;
-        }
-
+        if (string.IsNullOrWhiteSpace(line)) return UsbipdAttachState.NotFound;
+        if (line.Contains("Not shared", StringComparison.OrdinalIgnoreCase)) return UsbipdAttachState.NotShared;
+        if (line.Contains("Attached", StringComparison.OrdinalIgnoreCase)) return UsbipdAttachState.Attached;
+        if (Regex.IsMatch(line, @"\bShared\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) return UsbipdAttachState.Shared;
+        if (line.Contains("error", StringComparison.OrdinalIgnoreCase)) return UsbipdAttachState.Error;
         return UsbipdAttachState.NotShared;
     }
 
-    internal static IReadOnlyList<string> ParseBusIds(string listOutput)
+    internal static IReadOnlyList<string> ParseBusIds(string listOutput) =>
+        ParseAppleDevices(listOutput).Select(device => device.BusId).ToArray();
+
+    private static bool IsAccessDenied(string output) =>
+        output.Contains("Access denied", StringComparison.OrdinalIgnoreCase) ||
+        output.Contains("administrator", StringComparison.OrdinalIgnoreCase);
+
+    private static string Truncate(string? text, int max = 240)
     {
-        var ids = new List<string>();
-        foreach (var line in listOutput.Split('\n', '\r'))
-        {
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0)
-            {
-                continue;
-            }
-
-            var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length > 0 && parts[0].Contains('-', StringComparison.Ordinal))
-            {
-                ids.Add(parts[0]);
-            }
-        }
-
-        return ids;
+        var value = (text ?? string.Empty).Trim().Replace("\r", " ").Replace("\n", " ");
+        return value.Length <= max ? value : value[..max] + "...";
     }
 
     private string Invoke(params string[] args)
     {
-        if (!IsAvailable || ExecutablePath is null)
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            var result = ProcessRunner.Run(ExecutablePath, args);
-            return result.CombinedOutput;
-        }
-        catch
-        {
-            return string.Empty;
-        }
+        if (!IsAvailable || ExecutablePath is null) return string.Empty;
+        var result = ProcessRunner.Run(ExecutablePath, args, timeout: TimeSpan.FromSeconds(30));
+        return result.CombinedOutput;
     }
 }
