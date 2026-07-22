@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using Palera1nWin.Core.Settings;
 
 namespace Palera1nWin.App.Mvvm;
 
@@ -8,9 +9,7 @@ public sealed class RelayCommand : ICommand
     private readonly Predicate<object?>? _canExecute;
 
     public RelayCommand(Action execute, Func<bool>? canExecute = null)
-        : this(_ => execute(), canExecute is null ? null : _ => canExecute())
-    {
-    }
+        : this(_ => execute(), canExecute is null ? null : _ => canExecute()) { }
 
     public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null)
     {
@@ -19,20 +18,17 @@ public sealed class RelayCommand : ICommand
     }
 
     public event EventHandler? CanExecuteChanged;
-
     public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
-
     public void Execute(object? parameter) => _execute(parameter);
-
-    public void RaiseCanExecuteChanged()
-        => System.Windows.Application.Current?.Dispatcher.Invoke(() => CanExecuteChanged?.Invoke(this, EventArgs.Empty));
+    public void RaiseCanExecuteChanged() =>
+        System.Windows.Application.Current?.Dispatcher.Invoke(() => CanExecuteChanged?.Invoke(this, EventArgs.Empty));
 }
 
 public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<Task> _execute;
     private readonly Func<bool>? _canExecute;
-    private bool _isRunning;
+    private int _isRunning;
 
     public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null)
     {
@@ -41,45 +37,54 @@ public sealed class AsyncRelayCommand : ICommand
     }
 
     public event EventHandler? CanExecuteChanged;
-
-    public bool IsRunning
-    {
-        get => _isRunning;
-        private set
-        {
-            _isRunning = value;
-            RaiseCanExecuteChanged();
-        }
-    }
-
-    public bool CanExecute(object? parameter) => !_isRunning && (_canExecute?.Invoke() ?? true);
+    public bool IsRunning => Volatile.Read(ref _isRunning) != 0;
+    public bool CanExecute(object? parameter) => !IsRunning && (_canExecute?.Invoke() ?? true);
 
     public async void Execute(object? parameter)
     {
-        if (!CanExecute(parameter))
-        {
-            return;
-        }
-
-        IsRunning = true;
+        if (!CanExecute(parameter) || Interlocked.Exchange(ref _isRunning, 1) != 0) return;
+        RaiseCanExecuteChanged();
         try
         {
-            await _execute();
+            await _execute().ConfigureAwait(true);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
+            // Commands own their user-facing cancellation state.
+        }
+        catch (Exception exception)
+        {
+            var path = WriteFailure(exception);
             System.Windows.MessageBox.Show(
-                $"Unexpected error: {ex.Message}",
+                $"Unexpected error: {exception.Message}\n\nThe full error was written to:\n{path ?? AppSettings.LogsDirectory}",
                 "Palera1nWin",
                 System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Error);
         }
         finally
         {
-            IsRunning = false;
+            Interlocked.Exchange(ref _isRunning, 0);
+            RaiseCanExecuteChanged();
         }
     }
 
-    public void RaiseCanExecuteChanged()
-        => System.Windows.Application.Current?.Dispatcher.Invoke(() => CanExecuteChanged?.Invoke(this, EventArgs.Empty));
+    public void RaiseCanExecuteChanged() =>
+        System.Windows.Application.Current?.Dispatcher.Invoke(() => CanExecuteChanged?.Invoke(this, EventArgs.Empty));
+
+    private static string? WriteFailure(Exception exception)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppSettings.LogsDirectory);
+            var path = Path.Combine(
+                AppSettings.LogsDirectory,
+                $"command-error-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log");
+            File.WriteAllText(path, exception.ToString());
+            return path;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
