@@ -9,7 +9,7 @@
         <StackPanel>
           <TextBlock Text="Downgrade" Style="{StaticResource Text.Title}"/>
           <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,6,0,0"
-                     Text="Exact-device iOS/iPadOS 15 downloads, repairable preflight, visual DFU guidance, recoverable restore stages, and verified tether boot."/>
+                     Text="Exact-device iOS/iPadOS 15 downloads, a verified DFU/Pongo hardware gate, recoverable restore stages, and repeatable cold boot."/>
         </StackPanel>
         <Border x:Name="DeviceModeBadge" HorizontalAlignment="Right" VerticalAlignment="Top"
                 Style="{StaticResource Badge}" Background="#26343F52">
@@ -24,7 +24,7 @@
 
       <ui:InfoBar Margin="0,20,0,0" Severity="Warning" IsOpen="True" IsClosable="False"
                   Title="A tethered downgrade erases the device and requires a computer for every cold boot"
-                  Message="Preflight, exact ProductType confirmation, and the complete backup checklist are required. Activation Lock is not removed."/>
+                  Message="The non-destructive DFU → PongoOS hardware gate must pass before restore. Activation Lock is not removed."/>
 
       <TextBlock Text="CONNECTED DEVICE &amp; IOS 15 IPSW DOWNLOADER"
                  Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
@@ -175,7 +175,7 @@
                      Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="20"/>
           <ui:InfoBar Margin="0,14,0,0" Severity="Informational" IsOpen="True" IsClosable="False"
                       Title="Backend status"
-                      Message="Detection, downloads, inspection, and DFU guidance cover A9-A10X. The current native Windows SHC/PTE restore and tether-boot backend remains enabled only for A9/A9X; unsupported chip paths are blocked rather than guessed."/>
+                      Message="Detection, downloads, inspection, and DFU guidance cover A9-A10X. Native Windows SHC/PTE restore and tether boot remain enabled only for A9/A9X."/>
         </StackPanel>
       </ui:Card>
 
@@ -241,7 +241,22 @@
         </StackPanel>
       </ui:Card>
 
-      <TextBlock Text="ONE-CLICK PREFLIGHT &amp; AUTOMATIC DRIVER REPAIR" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <TextBlock Text="NON-DESTRUCTIVE HARDWARE GATE" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
+      <ui:Card>
+        <StackPanel>
+          <Grid>
+            <StackPanel MaxWidth="720">
+              <TextBlock Text="Prove DFU → checkm8 → PongoOS before erase" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+              <TextBlock x:Name="HardwareValidationStatusText" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
+                         Text="REQUIRED — this test changes only the DFU/Pongo USB binding and stops before SHC, PTE, or restore."/>
+            </StackPanel>
+            <ui:Button x:Name="ValidateHardwareButton" Content="Test DFU → PongoOS" Appearance="Primary"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Click="ValidateHardware_Click"/>
+          </Grid>
+        </StackPanel>
+      </ui:Card>
+
+      <TextBlock Text="PREFLIGHT &amp; VERIFIED DRIVER TRANSACTION" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
         <StackPanel>
           <Grid>
@@ -285,7 +300,7 @@
           <Grid>
             <StackPanel>
               <TextBlock x:Name="CurrentStageText" Text="Ready" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
-              <TextBlock x:Name="CurrentDetailText" Text="Complete DFU and preflight to enable the downgrade"
+              <TextBlock x:Name="CurrentDetailText" Text="Complete DFU, hardware validation, and preflight to enable the downgrade"
                          Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"/>
             </StackPanel>
             <ui:Button x:Name="CancelButton" Content="Pause / Cancel" Appearance="Transparent"
@@ -317,9 +332,9 @@
       <TextBlock Text="RECOVERY &amp; TARGETED RETRY" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
       <ui:Card>
         <StackPanel>
-          <TextBlock Text="Resume from the newest safe artifact" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+          <TextBlock Text="Resume from the newest hash-validated artifact" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
           <TextBlock x:Name="RecoveryStatusText" Style="{StaticResource Text.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
-                     Text="Scanning sessions for SHC, restore, PTE, or final-boot checkpoints..."/>
+                     Text="Scanning sessions for validated SHC or PTE metadata..."/>
           <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
             <ui:Button x:Name="ResumeSessionButton" Content="Resume Last Session" IsEnabled="False" Click="ResumeSession_Click"/>
             <ui:Button x:Name="RetryStageButton" Content="Retry Current Safe Stage" Appearance="Primary" IsEnabled="False"
@@ -360,9 +375,9 @@
 
         <ui:Card Grid.Column="1" Margin="10,0,0,0">
           <StackPanel>
-            <TextBlock Text="Tether boot" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
+            <TextBlock Text="Tether cold boot" Style="{StaticResource Text.Body}" FontWeight="SemiBold"/>
             <TextBlock Style="{StaticResource Text.Caption}" Margin="0,4,0,14"
-                       Text="Use the boot asset saved by a completed downgrade session after shutdown, restart, or a dead battery."/>
+                       Text="Use the saved PTE after shutdown, restart, or a dead battery. This does not repeat the downgrade."/>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -372,7 +387,7 @@
                        VerticalContentAlignment="Center" Text="No boot asset selected"/>
               <ui:Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowsePte_Click"/>
             </Grid>
-            <ui:Button x:Name="TetherBootButton" Content="Boot Device" Appearance="Secondary"
+            <ui:Button x:Name="TetherBootButton" Content="Boot Device" Appearance="Primary"
                        Padding="22,10" Margin="0,18,0,0" HorizontalAlignment="Left" IsEnabled="False"
                        Click="TetherBoot_Click"/>
             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
@@ -410,7 +425,7 @@
         <TextBox x:Name="DiagnosticsBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                  MinHeight="100" MaxHeight="220" VerticalScrollBarVisibility="Auto"
                  BorderThickness="0" Background="Transparent" FontFamily="Consolas, Cascadia Mono, Segoe UI"
-                 FontSize="11.5" Text="Run diagnostics to check administrator rights, disk space, exact ProductType, device mode, driver state, and packaged components."/>
+                 FontSize="11.5" Text="Run diagnostics to check administrator rights, disk space, exact ProductType, device mode, driver state, active hardware operation, and packaged components."/>
       </ui:Card>
 
       <TextBlock Text="TECHNICAL DETAILS" Style="{StaticResource Text.Section}" Margin="0,22,0,10"/>
