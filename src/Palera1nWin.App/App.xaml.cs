@@ -12,6 +12,7 @@ public partial class App : Application
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
     private MainViewModel? _mainViewModel;
+    private int _fatalShutdownStarted;
 
     private void OnStartup(object sender, StartupEventArgs e)
     {
@@ -55,20 +56,30 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         WriteCrashLog(e.Exception);
+        e.Handled = true;
+        if (Interlocked.Exchange(ref _fatalShutdownStarted, 1) != 0) return;
+
+        var operation = _mainViewModel?.ActiveHardwareOperation;
+        var operationText = operation?.IsBusy == true
+            ? $"\n\nActive operation: {operation.Operation}. The app will close rather than continue with unknown USB/process state. Keep the device connected until Windows finishes re-enumerating it, then reopen the app and use Recovery."
+            : "\n\nThe app will close rather than continue in a potentially inconsistent state.";
         MessageBox.Show(
-            $"Palera1nWin hit an unexpected error and wrote a crash log to:\n{AppSettings.LogsDirectory}\n\n{e.Exception.Message}",
-            "Palera1nWin",
+            $"Palera1nWin hit an unexpected error and wrote a crash log to:\n{AppSettings.LogsDirectory}\n\n{e.Exception.Message}{operationText}",
+            "Palera1nWin fatal error",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
-        e.Handled = true;
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+        {
+            try { _mainViewModel?.Dispose(); } catch { }
+            _mainViewModel = null;
+            Shutdown(-1);
+        }));
     }
 
     private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
-        if (e.ExceptionObject is Exception exception)
-        {
-            WriteCrashLog(exception);
-        }
+        if (e.ExceptionObject is Exception exception) WriteCrashLog(exception);
     }
 
     private static void WriteCrashLog(Exception exception)
@@ -79,7 +90,7 @@ public partial class App : Application
             string path = Path.Combine(AppSettings.LogsDirectory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(path, exception.ToString());
         }
-        catch (Exception)
+        catch
         {
             // Crash logging is best-effort.
         }
@@ -87,11 +98,12 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _mainViewModel?.Dispose();
+        try { _mainViewModel?.Dispose(); } catch { }
+        _mainViewModel = null;
 
         if (_ownsSingleInstanceMutex)
         {
-            _singleInstanceMutex?.ReleaseMutex();
+            try { _singleInstanceMutex?.ReleaseMutex(); } catch { }
         }
 
         _singleInstanceMutex?.Dispose();
