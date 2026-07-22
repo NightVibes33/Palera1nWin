@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.NetworkInformation;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
 
@@ -61,12 +62,13 @@ public sealed class DowngradePreflightService
         var checks = new List<PreflightCheckResult>();
         var snapshot = await _devices.ProbeAsync(cancellationToken).ConfigureAwait(false);
         IpswInspectionResult? inspection = null;
+        var administrator = IsAdministrator();
 
         Add(
             "administrator",
             "Administrator access",
-            IsAdministrator(),
-            IsAdministrator()
+            administrator,
+            administrator
                 ? "Palera1nWin is running elevated."
                 : "Restart Palera1nWin and approve the Windows User Account Control prompt.");
 
@@ -85,17 +87,16 @@ public sealed class DowngradePreflightService
                 ? "All managed and native restore components are present."
                 : "Missing: " + string.Join(", ", missing.Select(Path.GetFileName)));
 
+        var activeDevice = DarkSwordDeviceCatalog.Find(expectedProductType);
         Add(
             "device-identity",
             "Exact device identity",
-            !string.IsNullOrWhiteSpace(expectedProductType) && DarkSwordDeviceCatalog.IsSupported(expectedProductType),
-            string.IsNullOrWhiteSpace(expectedProductType)
-                ? "Connect and unlock the device once so its exact ProductType can be read."
-                : DarkSwordDeviceCatalog.Find(expectedProductType) is { } device
-                    ? $"{device.DisplayName} ({device.ProductType}, {device.Chip}) detected."
+            activeDevice is not null,
+            activeDevice is not null
+                ? $"{activeDevice.DisplayName} ({activeDevice.ProductType}, {activeDevice.Chip}) detected."
+                : string.IsNullOrWhiteSpace(expectedProductType)
+                    ? "Connect and unlock the device once so its exact ProductType can be read."
                     : $"{expectedProductType} is outside the supported A9-A10X device catalog.");
-
-        var activeDevice = DarkSwordDeviceCatalog.Find(expectedProductType);
         Add(
             "backend",
             "Windows restore backend",
@@ -103,8 +104,8 @@ public sealed class DowngradePreflightService
             activeDevice?.UsesA9SepBlocks == true
                 ? $"The {activeDevice.Chip} SHC/PTE backend is enabled."
                 : activeDevice is null
-                    ? "The device backend cannot be selected until ProductType is known."
-                    : $"{activeDevice.Chip} detection and DFU guidance are available, but its separate restore backend is not enabled.");
+                    ? "The backend cannot be selected until ProductType is known."
+                    : $"{activeDevice.Chip} detection and DFU guidance are available, but its restore backend is not enabled.");
 
         if (!File.Exists(ipswPath))
         {
@@ -145,7 +146,7 @@ public sealed class DowngradePreflightService
                 "disk",
                 "Free disk space",
                 drive.AvailableFreeSpace >= required,
-                $"{FormatBytes(drive.AvailableFreeSpace)} free on {drive.Name}; {FormatBytes(required)} required for firmware caches, restore images, and recovery assets.");
+                $"{FormatBytes(drive.AvailableFreeSpace)} free on {drive.Name}; {FormatBytes(required)} required.");
         }
         catch (Exception exception)
         {
@@ -157,7 +158,7 @@ public sealed class DowngradePreflightService
             "Internet connection",
             NetworkInterface.GetIsNetworkAvailable(),
             NetworkInterface.GetIsNetworkAvailable()
-                ? "A network connection is available for firmware metadata and any required downloads."
+                ? "A network connection is available."
                 : "Connect this PC to the internet before continuing.");
 
         Add(
@@ -165,20 +166,26 @@ public sealed class DowngradePreflightService
             "Apple DFU mode",
             snapshot.Mode == AppleDeviceMode.Dfu,
             snapshot.Mode == AppleDeviceMode.Dfu
-                ? "Apple DFU mode is detected and the device screen should be completely black."
+                ? "Apple DFU is detected and the device screen should be completely black."
                 : snapshot.Mode == AppleDeviceMode.Recovery
                     ? "Recovery Mode was detected. Use the guided DFU sequence until the screen stays black."
                     : $"Current mode is {snapshot.Mode}. Complete the guided DFU sequence before starting.");
 
-        var driverReady = snapshot.Mode == AppleDeviceMode.Dfu && IsLibusbK(snapshot.Service);
         var repaired = false;
-        if (snapshot.Mode == AppleDeviceMode.Dfu && !driverReady && repairDfuDriver && IsAdministrator())
+        var driverReady = snapshot.Mode == AppleDeviceMode.Dfu && DfuDriverService.IsLibusbK(snapshot.Service);
+        if (snapshot.Mode == AppleDeviceMode.Dfu && !driverReady && repairDfuDriver && administrator)
         {
-            log?.Invoke($"DFU device is using service '{snapshot.Service ?? "unknown"}'. Installing libusbK automatically.");
-            await _driver.InstallLibusbKAsync(cancellationToken).ConfigureAwait(false);
-            repaired = true;
-            snapshot = await WaitForDfuDriverAsync(cancellationToken).ConfigureAwait(false);
-            driverReady = snapshot.Mode == AppleDeviceMode.Dfu && IsLibusbK(snapshot.Service);
+            try
+            {
+                var result = await _driver.EnsureDfuReadyAsync(_devices, log, cancellationToken).ConfigureAwait(false);
+                snapshot = result.Snapshot;
+                repaired = result.Changed;
+                driverReady = DfuDriverService.IsLibusbK(snapshot.Service);
+            }
+            catch (Exception exception)
+            {
+                log?.Invoke($"DFU driver repair failed: {exception.Message}");
+            }
         }
         Add(
             "driver",
@@ -187,8 +194,8 @@ public sealed class DowngradePreflightService
             driverReady
                 ? $"Apple DFU is attached through {snapshot.Service ?? "libusbK"}."
                 : snapshot.Mode != AppleDeviceMode.Dfu
-                    ? "Driver state is checked after Apple DFU mode is detected."
-                    : $"Apple DFU is using '{snapshot.Service ?? "an unknown service"}'. Automatic libusbK installation did not verify successfully.",
+                    ? "Driver state is checked after DFU is detected."
+                    : $"Apple DFU is using '{snapshot.Service ?? "unknown"}'. The verified driver transaction did not complete.",
             repaired && driverReady);
 
         var battery = await TryReadBatteryAsync(snapshot, cancellationToken).ConfigureAwait(false);
@@ -198,9 +205,7 @@ public sealed class DowngradePreflightService
             battery is null || battery >= 30,
             battery is null
                 ? "Battery percentage is unavailable in DFU; keep the device connected directly to a powered USB port."
-                : battery >= 30
-                    ? $"Battery is {battery}%."
-                    : $"Battery is only {battery}%. Charge to at least 30% before restoring.");
+                : battery >= 30 ? $"Battery is {battery}%." : $"Battery is only {battery}%. Charge to at least 30%.");
 
         var fingerprint = BuildFingerprint(expectedProductType, ipswPath, snapshot, inspection);
         return new PreflightReport(DateTimeOffset.UtcNow, checks, snapshot, inspection, fingerprint);
@@ -231,20 +236,6 @@ public sealed class DowngradePreflightService
             snapshot.Service ?? string.Empty,
             inspection?.Sha256 ?? string.Empty
         });
-    }
-
-    private async Task<AppleDeviceSnapshot> WaitForDfuDriverAsync(CancellationToken cancellationToken)
-    {
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(25);
-        AppleDeviceSnapshot last = AppleDeviceSnapshot.Disconnected;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            last = await _devices.ProbeAsync(cancellationToken).ConfigureAwait(false);
-            if (last.Mode == AppleDeviceMode.Dfu && IsLibusbK(last.Service)) return last;
-            await Task.Delay(750, cancellationToken).ConfigureAwait(false);
-        }
-        return last;
     }
 
     private async Task<int?> TryReadBatteryAsync(AppleDeviceSnapshot snapshot, CancellationToken cancellationToken)
@@ -282,10 +273,6 @@ public sealed class DowngradePreflightService
         return (await stdout.ConfigureAwait(false)) + Environment.NewLine + (await stderr.ConfigureAwait(false));
     }
 
-    private static bool IsLibusbK(string? service) =>
-        !string.IsNullOrWhiteSpace(service) &&
-        service.Contains("libusb", StringComparison.OrdinalIgnoreCase);
-
     private static bool IsAdministrator()
     {
         using var identity = WindowsIdentity.GetCurrent();
@@ -316,18 +303,12 @@ public sealed record RecoveryCandidate(
 
 public sealed class DowngradeRecoveryService
 {
-    private const string PreShcFlag = "checkpoint-pre-shc.ok";
-    private const string RestoreFlag = "checkpoint-restore.ok";
-    private const string PostShcFlag = "checkpoint-post-shc.ok";
-    private const string PteFlag = "checkpoint-pte.ok";
-    private const string CompleteFlag = "checkpoint-complete.ok";
-
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ToolchainPaths _tools;
     private readonly ToolProcessRunner _runner;
     private readonly AppleDeviceMonitor _devices;
     private readonly RestoreSessionStore _sessions;
-    private readonly DfuDriverService _driver;
+    private readonly DarkSwordOrchestrator _orchestrator;
     private string? _lastProgressSignature;
 
     public DowngradeRecoveryService(
@@ -341,7 +322,7 @@ public sealed class DowngradeRecoveryService
         _runner = runner;
         _devices = devices;
         _sessions = sessions;
-        _driver = driver;
+        _orchestrator = new DarkSwordOrchestrator(tools, runner, new IpswInspector(), devices, sessions, driver);
     }
 
     public async Task<RecoveryCandidate?> FindLatestRecoverableAsync(CancellationToken cancellationToken = default)
@@ -352,7 +333,7 @@ public sealed class DowngradeRecoveryService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var session = await _sessions.LoadAsync(directory, cancellationToken).ConfigureAwait(false);
-            if (session is null || File.Exists(Path.Combine(directory, CompleteFlag))) continue;
+            if (session is null || session.LastStage == RestoreStage.Completed) continue;
             var candidate = BuildCandidate(session);
             if (candidate.CanResume) return candidate;
         }
@@ -370,12 +351,6 @@ public sealed class DowngradeRecoveryService
             : null;
         if (directory is null || !File.Exists(Path.Combine(directory, "session.json"))) return;
 
-        if (progress.Stage == RestoreStage.WaitingForDfu && progress.Percent >= 28) Mark(directory, PreShcFlag);
-        if (progress.Stage == RestoreStage.WaitingForDfu && progress.Percent >= 73) Mark(directory, RestoreFlag);
-        if (progress.Stage == RestoreStage.WaitingForDfu && progress.Percent >= 83) Mark(directory, PostShcFlag);
-        if (progress.Stage == RestoreStage.WaitingForDfu && progress.Percent >= 92) Mark(directory, PteFlag);
-        if (progress.Stage == RestoreStage.Completed) Mark(directory, CompleteFlag);
-
         var statePath = Path.Combine(directory, "recovery-progress.json");
         var temporary = statePath + ".tmp";
         await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(progress, JsonOptions), cancellationToken).ConfigureAwait(false);
@@ -391,15 +366,11 @@ public sealed class DowngradeRecoveryService
     {
         var session = candidate.Session;
         if (!File.Exists(session.IpswPath))
-        {
             throw new FileNotFoundException("The IPSW used by this recovery session is missing.", session.IpswPath);
-        }
         if (!session.Ipsw.MatchesProductType(expectedProductType))
-        {
             throw new DarkSwordException(
                 RestoreStage.Preflight,
                 $"Recovery session targets {string.Join(", ", session.Ipsw.SupportedProductTypes)}, not connected device {expectedProductType}.");
-        }
 
         var preShc = candidate.PreRestoreShc;
         var postShc = candidate.PostRestoreShc;
@@ -410,33 +381,16 @@ public sealed class DowngradeRecoveryService
         {
             if (pte is not null)
             {
-                Report(RestoreStage.WaitingForDfu, 92, "Resume final tether boot", "Existing PTE block found. Enter DFU to boot the restored system.");
-                await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-                await TetherBootCoreAsync(pte, progress, log, cancellationToken).ConfigureAwait(false);
+                Report(RestoreStage.WaitingForDfu, 92, "Resume final tether boot", "Validated PTE found. Enter DFU to boot the restored system.");
+                await _orchestrator.TetherBootAsync(pte, progress, log, cancellationToken).ConfigureAwait(false);
                 return await CompleteAsync(session with { PteBlockPath = pte }, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (postShc is null && File.Exists(Path.Combine(directory, RestoreFlag)))
-            {
-                Report(RestoreStage.WaitingForDfu, 73, "Resume boot-profile creation", "The firmware restore completed. Enter DFU to capture the post-restore SHC block.");
-                await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-                await BootPongoAsync(log, cancellationToken).ConfigureAwait(false);
-                postShc = await RunBlockOperationAsync(
-                    session,
-                    "shcblock",
-                    new[] { "--get-shcblock", "--cache-path", Path.Combine(directory, "cache"), session.IpswPath },
-                    log,
-                    cancellationToken,
-                    excludedPath: preShc).ConfigureAwait(false);
-                Mark(directory, PostShcFlag);
             }
 
             if (postShc is null && preShc is not null)
             {
-                Report(RestoreStage.WaitingForDfu, 28, "Resume firmware restore", "The pre-restore SHC block is safe. Enter DFU to retry the firmware restore.");
-                await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-                await BootPongoAsync(log, cancellationToken).ConfigureAwait(false);
-                Report(RestoreStage.RestoringFirmware, 38, "Retrying firmware restore", "Reusing the completed SHC capture and firmware cache.", true);
+                Report(RestoreStage.WaitingForDfu, 28, "Resume firmware restore", "Validated pre-restore SHC found. Enter DFU to retry the restore.");
+                await PreparePongoAsync(log, cancellationToken).ConfigureAwait(false);
+                Report(RestoreStage.RestoringFirmware, 38, "Retrying firmware restore", "Reusing the validated SHC and firmware cache.", true);
                 await RunRestoreAsync(
                     session,
                     new[]
@@ -449,33 +403,27 @@ public sealed class DowngradeRecoveryService
                     log,
                     progress,
                     cancellationToken).ConfigureAwait(false);
-                Mark(directory, RestoreFlag);
+                session = session with { LastStage = RestoreStage.RestoringFirmware, UpdatedAt = DateTimeOffset.UtcNow };
+                await _sessions.SaveAsync(session, cancellationToken).ConfigureAwait(false);
 
-                Report(RestoreStage.WaitingForDfu, 73, "Create permanent boot profile", "Restore retry completed. Enter DFU to capture the post-restore SHC block.");
-                await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-                await BootPongoAsync(log, cancellationToken).ConfigureAwait(false);
-                postShc = await RunBlockOperationAsync(
+                Report(RestoreStage.WaitingForDfu, 73, "Capture post-restore SHC", "Restore completed. Enter DFU again.");
+                await PreparePongoAsync(log, cancellationToken).ConfigureAwait(false);
+                postShc = await GenerateArtifactAsync(
                     session,
                     "shcblock",
                     new[] { "--get-shcblock", "--cache-path", Path.Combine(directory, "cache"), session.IpswPath },
                     log,
                     cancellationToken,
                     excludedPath: preShc).ConfigureAwait(false);
-                Mark(directory, PostShcFlag);
             }
 
             if (postShc is null)
-            {
-                throw new DarkSwordException(
-                    RestoreStage.Preflight,
-                    "No safe SHC recovery checkpoint exists. Start a new downgrade; the existing session remains preserved for diagnostics.");
-            }
+                throw new DarkSwordException(RestoreStage.Preflight, "No validated SHC recovery artifact exists.");
 
-            Report(RestoreStage.WaitingForDfu, 83, "Resume PTE generation", "Post-restore SHC block found. Enter DFU to generate the permanent tether-boot asset.");
-            await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-            await BootPongoAsync(log, cancellationToken).ConfigureAwait(false);
-            Report(RestoreStage.GeneratingPteBlock, 87, "Generating PTE block", "Reusing the post-restore SHC block.");
-            pte = await RunBlockOperationAsync(
+            Report(RestoreStage.WaitingForDfu, 83, "Resume PTE generation", "Validated post-restore SHC found. Enter DFU.");
+            await PreparePongoAsync(log, cancellationToken).ConfigureAwait(false);
+            Report(RestoreStage.GeneratingPteBlock, 87, "Generating PTE block", "Creating the permanent tether-boot asset.");
+            pte = await GenerateArtifactAsync(
                 session,
                 "pteblock",
                 new[]
@@ -485,7 +433,6 @@ public sealed class DowngradeRecoveryService
                 },
                 log,
                 cancellationToken).ConfigureAwait(false);
-            Mark(directory, PteFlag);
 
             session = session with
             {
@@ -497,8 +444,7 @@ public sealed class DowngradeRecoveryService
             await _sessions.SaveAsync(session, cancellationToken).ConfigureAwait(false);
 
             Report(RestoreStage.WaitingForDfu, 92, "Final DFU entry", "Enter DFU once more to boot the restored system.");
-            await PrepareDfuAsync(cancellationToken).ConfigureAwait(false);
-            await TetherBootCoreAsync(pte, progress, log, cancellationToken).ConfigureAwait(false);
+            await _orchestrator.TetherBootAsync(pte, progress, log, cancellationToken).ConfigureAwait(false);
             return await CompleteAsync(session, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -520,95 +466,102 @@ public sealed class DowngradeRecoveryService
 
     private RecoveryCandidate BuildCandidate(RestoreSession session)
     {
-        var blockDirectory = Path.Combine(session.SessionDirectory, "block");
-        var shc = Directory.Exists(blockDirectory)
-            ? Directory.EnumerateFiles(blockDirectory, "*", SearchOption.AllDirectories)
-                .Where(path => Path.GetFileName(path).Contains("shcblock", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(File.GetLastWriteTimeUtc)
-                .ToArray()
-            : [];
-        var pte = Directory.Exists(blockDirectory)
-            ? Directory.EnumerateFiles(blockDirectory, "*", SearchOption.AllDirectories)
-                .Where(path => Path.GetFileName(path).Contains("pteblock", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault()
-            : null;
-        pte ??= File.Exists(session.PteBlockPath) ? session.PteBlockPath : null;
+        var artifacts = EnumerateValidatedArtifacts(session.SessionDirectory).ToArray();
+        var shc = artifacts
+            .Where(item => item.Metadata.ArtifactType.Contains("shc", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.Metadata.CreatedAt)
+            .Select(item => item.Path)
+            .ToArray();
+        var pte = artifacts
+            .Where(item => item.Metadata.ArtifactType.Contains("pte", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.Metadata.CreatedAt)
+            .Select(item => item.Path)
+            .FirstOrDefault();
 
         var pre = shc.FirstOrDefault();
         var post = shc.Length >= 2 ? shc[^1] : null;
         var canResume = pte is not null || post is not null || pre is not null;
         var description = pte is not null
-            ? "PTE block is complete; retry the final tether boot."
+            ? "Validated PTE is complete; retry final tether boot."
             : post is not null
-                ? "Post-restore SHC exists; continue with PTE generation."
+                ? "Validated post-restore SHC exists; continue with PTE generation."
                 : pre is not null
-                    ? "Pre-restore SHC exists; retry the restore without repeating the first capture."
-                    : "No safe recovery artifact is available.";
+                    ? "Validated pre-restore SHC exists; retry restore without repeating the first capture."
+                    : "No validated recovery artifact is available.";
         return new RecoveryCandidate(session, description, canResume, pre, post, pte);
     }
 
-    private async Task PrepareDfuAsync(CancellationToken cancellationToken)
+    private IEnumerable<(string Path, RestoreArtifactMetadata Metadata)> EnumerateValidatedArtifacts(string sessionDirectory)
     {
-        await _devices.WaitForModeAsync(new[] { AppleDeviceMode.Dfu }, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
-        await _driver.InstallLibusbKAsync(cancellationToken).ConfigureAwait(false);
-        await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
-        await _devices.WaitForModeAsync(new[] { AppleDeviceMode.Dfu }, TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        if (!Directory.Exists(sessionDirectory)) yield break;
+        foreach (var metadataPath in Directory.EnumerateFiles(sessionDirectory, "*.metadata.json", SearchOption.AllDirectories))
+        {
+            RestoreArtifactMetadata? metadata;
+            try
+            {
+                metadata = JsonSerializer.Deserialize<RestoreArtifactMetadata>(File.ReadAllText(metadataPath), JsonOptions);
+            }
+            catch
+            {
+                continue;
+            }
+            if (metadata is null || !File.Exists(metadata.Path)) continue;
+            var file = new FileInfo(metadata.Path);
+            if (file.Length != metadata.Size || file.Length <= 0) continue;
+            using var stream = File.OpenRead(metadata.Path);
+            var actual = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            if (!string.Equals(actual, metadata.Sha256, StringComparison.OrdinalIgnoreCase)) continue;
+            yield return (metadata.Path, metadata);
+        }
     }
 
-    private async Task BootPongoAsync(Action<string>? log, CancellationToken cancellationToken)
-    {
-        var openTask = _runner.RunAsync(
-            _tools.OpenRa1n,
-            Array.Empty<string>(),
-            _tools.Root,
-            log,
-            cancellationToken,
-            requireZeroExitCode: false);
-        try
-        {
-            await _devices.WaitForModeAsync(new[] { AppleDeviceMode.Pongo }, TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            var result = await openTask.ConfigureAwait(false);
-            throw new DarkSwordException(
-                RestoreStage.BootingPongo,
-                $"PongoOS did not enumerate. openra1n exit code: {result.ExitCode}.{Environment.NewLine}{result.StandardError}");
-        }
-        await openTask.ConfigureAwait(false);
-    }
+    private Task PreparePongoAsync(Action<string>? log, CancellationToken cancellationToken) =>
+        _orchestrator.ValidateDfuToPongoAsync(null, log, cancellationToken);
 
-    private async Task<string> RunBlockOperationAsync(
+    private async Task<string> GenerateArtifactAsync(
         RestoreSession session,
-        string fileToken,
+        string artifactType,
         string[] arguments,
         Action<string>? log,
         CancellationToken cancellationToken,
         string? excludedPath = null)
     {
-        var blockDirectory = Path.Combine(session.SessionDirectory, "block");
-        Directory.CreateDirectory(blockDirectory);
-        var before = Directory.EnumerateFiles(blockDirectory, "*", SearchOption.AllDirectories)
+        var started = DateTimeOffset.UtcNow;
+        var before = Directory.EnumerateFiles(session.SessionDirectory, "*", SearchOption.AllDirectories)
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (excludedPath is not null) before.Add(Path.GetFullPath(excludedPath));
 
-        await _runner.RunAsync(
-            _tools.IdeviceRestore,
-            arguments,
-            session.SessionDirectory,
-            log,
-            cancellationToken).ConfigureAwait(false);
-
+        await _runner.RunAsync(_tools.IdeviceRestore, arguments, session.SessionDirectory, log, cancellationToken).ConfigureAwait(false);
         var generated = Directory.EnumerateFiles(session.SessionDirectory, "*", SearchOption.AllDirectories)
-            .Where(path => Path.GetFileName(path).Contains(fileToken, StringComparison.OrdinalIgnoreCase))
-            .Where(path => !before.Contains(Path.GetFullPath(path)))
+            .Select(Path.GetFullPath)
+            .Where(path => Path.GetFileName(path).Contains(artifactType, StringComparison.OrdinalIgnoreCase))
+            .Where(path => !before.Contains(path))
+            .Where(path => File.GetLastWriteTimeUtc(path) >= started.UtcDateTime.AddSeconds(-2))
             .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-        return generated ?? throw new DarkSwordException(
-            fileToken.Contains("pte", StringComparison.OrdinalIgnoreCase) ? RestoreStage.GeneratingPteBlock : RestoreStage.GeneratingShcBlock,
-            $"The tool completed without producing a new {fileToken} file.");
+            .FirstOrDefault()
+            ?? throw new DarkSwordException(
+                artifactType.Contains("pte", StringComparison.OrdinalIgnoreCase) ? RestoreStage.GeneratingPteBlock : RestoreStage.GeneratingShcBlock,
+                $"The tool completed without producing a new {artifactType} file.");
+
+        var file = new FileInfo(generated);
+        if (file.Length <= 0) throw new InvalidDataException($"Generated artifact is empty: {generated}");
+        await using var stream = File.OpenRead(generated);
+        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+        var metadata = new RestoreArtifactMetadata(
+            session.SessionId,
+            artifactType,
+            generated,
+            file.Length,
+            hash,
+            session.Ipsw.ProductVersion,
+            session.Ipsw.BuildVersion,
+            DateTimeOffset.UtcNow);
+        await File.WriteAllTextAsync(
+            generated + ".metadata.json",
+            JsonSerializer.Serialize(metadata, JsonOptions),
+            cancellationToken).ConfigureAwait(false);
+        return generated;
     }
 
     private async Task RunRestoreAsync(
@@ -638,38 +591,10 @@ public sealed class DowngradeRecoveryService
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task TetherBootCoreAsync(
-        string pteBlockPath,
-        IProgress<RestoreProgress>? progress,
-        Action<string>? log,
-        CancellationToken cancellationToken)
-    {
-        progress?.Report(new RestoreProgress(RestoreStage.BootingPongo, 20, "Booting PongoOS", "Running checkm8 and uploading PongoOS."));
-        await BootPongoAsync(log, cancellationToken).ConfigureAwait(false);
-
-        var resourceRoot = Path.Combine(_tools.Root, "resources");
-        var sepRacer = Path.Combine(resourceRoot, "sep_racer.bin");
-        var kpf = Path.Combine(resourceRoot, "kpf.bin");
-        if (!File.Exists(sepRacer) || !File.Exists(kpf))
-        {
-            throw new DarkSwordException(RestoreStage.LoadingSepExploit, "The release is missing sep_racer.bin or kpf.bin.");
-        }
-
-        progress?.Report(new RestoreProgress(RestoreStage.LoadingSepExploit, 45, "Running SEP exploit", "Loading sep_racer and the saved PTE block."));
-        await _runner.RunAsync(
-            _tools.PongoBridge,
-            new[] { "boot", "--pteblock", pteBlockPath, "--sep-racer", sepRacer, "--kpf", kpf },
-            _tools.Root,
-            log,
-            cancellationToken).ConfigureAwait(false);
-        progress?.Report(new RestoreProgress(RestoreStage.BootingXnu, 90, "Booting XNU", "Applying tethered kernel patches and issuing bootux."));
-    }
-
     private async Task<RestoreSession> CompleteAsync(RestoreSession session, CancellationToken cancellationToken)
     {
         session = session with { LastStage = RestoreStage.Completed, UpdatedAt = DateTimeOffset.UtcNow };
         await _sessions.SaveAsync(session, cancellationToken).ConfigureAwait(false);
-        Mark(session.SessionDirectory, CompleteFlag);
         return session;
     }
 
@@ -683,11 +608,5 @@ public sealed class DowngradeRecoveryService
         if (values.Length == 0) return false;
         percent = values[^1];
         return true;
-    }
-
-    private static void Mark(string directory, string flag)
-    {
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, flag), DateTimeOffset.UtcNow.ToString("O"));
     }
 }
