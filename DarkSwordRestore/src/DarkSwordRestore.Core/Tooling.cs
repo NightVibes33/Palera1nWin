@@ -38,7 +38,7 @@ internal sealed class BoundedLineBuffer
     private readonly Queue<string> _lines = new();
     private readonly object _gate = new();
 
-    public BoundedLineBuffer(int capacity = 5000) => _capacity = capacity;
+    public BoundedLineBuffer(int capacity = 10_000) => _capacity = Math.Max(100, capacity);
 
     public void Add(string line)
     {
@@ -65,7 +65,7 @@ public sealed class ToolProcessSession : IAsyncDisposable
     private readonly CancellationTokenRegistration _cancellationRegistration;
     private readonly TaskCompletionSource _stdoutClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _stderrClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TimeSpan? _timeout;
+    private readonly TimeSpan _timeout;
     private int _disposed;
 
     internal ToolProcessSession(
@@ -74,14 +74,14 @@ public sealed class ToolProcessSession : IAsyncDisposable
         string? workingDirectory,
         Action<string>? onOutput,
         CancellationToken cancellationToken,
-        TimeSpan? timeout)
+        TimeSpan timeout)
     {
         var startInfo = CreateStartInfo(fileName, arguments, workingDirectory);
         FileName = fileName;
         Arguments = string.Join(' ', startInfo.ArgumentList.Select(QuoteForLog));
         _timeout = timeout;
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (timeout.HasValue) _lifetime.CancelAfter(timeout.Value);
+        _lifetime.CancelAfter(timeout);
         _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _process.OutputDataReceived += (_, args) =>
         {
@@ -120,14 +120,16 @@ public sealed class ToolProcessSession : IAsyncDisposable
         {
             await _process.WaitForExitAsync(_lifetime.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested && _timeout.HasValue)
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
         {
             Kill();
-            throw new TimeoutException($"{Path.GetFileName(FileName)} timed out after {_timeout.Value}.");
+            try { await _process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
+            throw new TimeoutException(
+                $"{Path.GetFileName(FileName)} exceeded its hard timeout of {_timeout}. Its process tree was terminated and the restore session was preserved.");
         }
         finally
         {
-            KillIfCancellationRequested();
+            if (_lifetime.IsCancellationRequested) Kill();
         }
 
         await WaitForOutputCloseAsync().ConfigureAwait(false);
@@ -143,11 +145,6 @@ public sealed class ToolProcessSession : IAsyncDisposable
             await Task.WhenAll(_stdoutClosed.Task, _stderrClosed.Task).WaitAsync(timeout.Token).ConfigureAwait(false);
         }
         catch { }
-    }
-
-    private void KillIfCancellationRequested()
-    {
-        if (_lifetime.IsCancellationRequested) Kill();
     }
 
     public async ValueTask DisposeAsync()
@@ -198,7 +195,13 @@ public sealed class ToolProcessRunner
         TimeSpan? timeout = null)
     {
         if (!File.Exists(fileName)) throw new FileNotFoundException("Required tool was not found.", fileName);
-        return new ToolProcessSession(fileName, arguments, workingDirectory, onOutput, cancellationToken, timeout);
+        return new ToolProcessSession(
+            fileName,
+            arguments,
+            workingDirectory,
+            onOutput,
+            cancellationToken,
+            timeout ?? ResolveDefaultTimeout(fileName));
     }
 
     public async Task<ToolResult> RunAsync(
@@ -211,8 +214,12 @@ public sealed class ToolProcessRunner
         TimeSpan? timeout = null)
     {
         await using var session = StartSession(
-            fileName, arguments, workingDirectory, onOutput, cancellationToken,
-            timeout ?? TimeSpan.FromMinutes(20));
+            fileName,
+            arguments,
+            workingDirectory,
+            onOutput,
+            cancellationToken,
+            timeout ?? ResolveDefaultTimeout(fileName));
         var result = await session.Completion.ConfigureAwait(false);
         if (requireZeroExitCode && !result.Success)
             throw new InvalidOperationException(
@@ -239,7 +246,7 @@ public sealed class ToolProcessRunner
             UseShellExecute = true,
             Verb = "runas",
         };
-        return RunElevatedCoreAsync(start, cancellationToken, timeout ?? TimeSpan.FromMinutes(2));
+        return RunElevatedCoreAsync(start, cancellationToken, timeout ?? TimeSpan.FromMinutes(3));
     }
 
     private static async Task<ToolResult> RunElevatedCoreAsync(
@@ -287,6 +294,25 @@ public sealed class ToolProcessRunner
                     $"{Path.GetFileName(startInfo.FileName)} exited with code {result.ExitCode}; the USB driver was not changed.");
             return result;
         }
+    }
+
+    internal static TimeSpan ResolveDefaultTimeout(string fileName)
+    {
+        var name = Path.GetFileName(fileName);
+        if (name.Contains("turdus", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("idevicerestore", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromHours(2);
+        if (name.Contains("openra1n", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(3);
+        if (name.Contains("pongo", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(5);
+        if (name.Contains("wdi", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(3);
+        if (name.Contains("irecovery", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("ideviceinfo", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromSeconds(30);
+        return TimeSpan.FromMinutes(20);
     }
 
     internal static string BuildWindowsCommandLine(IEnumerable<string> arguments) =>
