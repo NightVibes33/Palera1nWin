@@ -269,12 +269,16 @@ public partial class DowngradeView
         }
         finally
         {
+            var removeHandler = false;
             lock (_identityGuardSync)
             {
-                if (generation != _identityGuardGeneration) return;
-                _guardIdentity = null;
+                if (generation == _identityGuardGeneration)
+                {
+                    _guardIdentity = null;
+                    removeHandler = true;
+                }
             }
-            _monitor.DeviceChanged -= ExactIdentityGuard_DeviceChanged;
+            if (removeHandler) _monitor.DeviceChanged -= ExactIdentityGuard_DeviceChanged;
         }
     }
 
