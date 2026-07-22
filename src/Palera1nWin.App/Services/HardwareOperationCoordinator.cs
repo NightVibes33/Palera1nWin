@@ -60,6 +60,13 @@ public sealed class HardwareOperationCoordinator : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (operation == HardwareOperationKind.None) throw new ArgumentOutOfRangeException(nameof(operation));
 
+        // Diagnostics may be needed to explain an incomplete package. Every action
+        // that can mutate drivers, WSL, USB ownership, firmware, or boot state must
+        // first prove that its elevated executable/toolchain files still match the
+        // package manifest created by CI.
+        if (operation != HardwareOperationKind.Diagnostics)
+            await PackageIntegrityVerifier.EnsureValidAsync(cancellationToken).ConfigureAwait(false);
+
         if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
             throw new HardwareOperationBusyException(operation, Current);
 
