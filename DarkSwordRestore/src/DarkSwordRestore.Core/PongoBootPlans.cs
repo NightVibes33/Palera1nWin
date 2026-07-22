@@ -48,7 +48,7 @@ public static class PongoBootPlanRegistry
 
     public static PongoBootPlanCapability Get(PongoBootPlanKind kind) => Capabilities[kind];
 
-    public static IReadOnlyCollection<PongoBootPlanCapability> All => Capabilities.Values;
+    public static IReadOnlyCollection<PongoBootPlanCapability> All => Capabilities.Values.ToArray();
 
     public static void RequireEnabled(PongoBootPlanKind kind)
     {
