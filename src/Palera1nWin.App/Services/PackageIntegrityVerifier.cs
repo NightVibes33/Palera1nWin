@@ -37,6 +37,10 @@ public static class PackageIntegrityVerifier
         "toolchain/dist/palera1n-linux-x86_64",
     ];
 
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static PackageIntegrityReport? _cached;
     private static DateTimeOffset _cachedAt;
@@ -66,7 +70,8 @@ public static class PackageIntegrityVerifier
                 await using var stream = File.OpenRead(manifestPath);
                 entries = await JsonSerializer.DeserializeAsync<List<ManifestEntry>>(
                     stream,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                    ManifestJsonOptions,
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
