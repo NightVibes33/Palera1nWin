@@ -14,7 +14,7 @@ public sealed class RedactedSessionExportService
         WriteIndented = true,
     };
     private static readonly Regex WindowsPath = new(
-        @"(?i)(?:[a-z]:\\|\\\\)[^\r\n\t\"']+",
+        "(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\t\\\"']+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex EcidLine = new(
         @"(?im)(ECID\s*[=:]\s*)(?:0x)?[0-9a-f]+",
@@ -215,7 +215,11 @@ public sealed class RedactedSessionExportService
     {
         var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
         await using var output = entry.Open();
-        await using var writer = new StreamWriter(output, new UTF8Encoding(false), leaveOpen: false);
+        await using var writer = new StreamWriter(
+            output,
+            new UTF8Encoding(false),
+            bufferSize: 1024,
+            leaveOpen: false);
         await writer.WriteAsync(text.AsMemory(), cancellationToken);
     }
 
