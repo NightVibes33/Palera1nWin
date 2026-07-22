@@ -106,8 +106,14 @@ try {
     Assert-File "DarkSwordRestore.Core.dll" 1024 | Out-Null
     Assert-BinaryString "Palera1nWin.dll" "DowngradeView"
     Assert-BinaryString "Palera1nWin.dll" "FirmwareFeatures_Loaded"
-    Assert-BinaryString "Palera1nWin.dll" "api.ipsw.me"
+    Assert-BinaryString "Palera1nWin.dll" "LoadFirmwareCatalogAsync"
+    Assert-BinaryString "Palera1nWin.dll" "InitializeOperationalExperience"
     Assert-BinaryString "Palera1nWin.dll" "DarkSwordRestore.Core"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "CompatibilityAssessmentService"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "CableStabilityTracker"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "SessionExportService"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "DowngradeFailureTranslator"
+    Assert-BinaryString "DarkSwordRestore.Core.dll" "PowerProtectionLease"
 
     Assert-File "toolchain\native-build-manifest.txt" 32 | Out-Null
     Assert-File "toolchain\resources\sep_racer.bin" 128 | Out-Null
