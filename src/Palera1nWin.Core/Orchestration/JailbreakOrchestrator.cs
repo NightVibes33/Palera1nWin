@@ -26,17 +26,22 @@ public sealed class JailbreakOrchestrator : IDisposable
 {
     private readonly AppSettings _settings;
     private readonly AppleUsbMonitor _monitor;
+    private readonly bool _ownsMonitor;
     private readonly DriverInstaller _driverInstaller;
     private readonly UsbipdService _usbipdService;
     private readonly OpenRa1nService _openRa1nService;
     private readonly Palera1nHostService _palera1nHostService;
     private readonly IUserPromptService? _userPrompts;
 
-    public JailbreakOrchestrator(AppSettings settings, IUserPromptService? userPrompts = null)
+    public JailbreakOrchestrator(
+        AppSettings settings,
+        IUserPromptService? userPrompts = null,
+        AppleUsbMonitor? monitor = null)
     {
         _settings = settings;
         _userPrompts = userPrompts;
-        _monitor = new AppleUsbMonitor();
+        _monitor = monitor ?? new AppleUsbMonitor();
+        _ownsMonitor = monitor is null;
         _driverInstaller = new DriverInstaller(settings, _monitor);
         _usbipdService = new UsbipdService();
         _openRa1nService = new OpenRa1nService(_monitor);
@@ -47,204 +52,112 @@ public sealed class JailbreakOrchestrator : IDisposable
     }
 
     public event EventHandler<LogLine>? LogReceived;
-
     public event EventHandler<ProgressEventArgs>? ProgressChanged;
 
     public async Task<JailbreakStage> RunAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            Report(JailbreakStage.Validating, "Validating toolchain and settings...", 0);
-
+            Report(JailbreakStage.Validating, "Validating shared toolchain and USB state...", 0);
             _settings.Clamp();
+
             var toolchain = Paths.ResolveToolchainRoot(_settings.ToolchainRoot);
             if (toolchain is null)
             {
                 Fail("Toolchain root is missing or invalid.");
                 return JailbreakStage.Failed;
             }
-
             if (!Paths.ValidateToolchain(toolchain, out var missing))
             {
                 Fail($"Missing toolchain files: {string.Join(", ", missing)}");
                 return JailbreakStage.Failed;
             }
 
-            Report(JailbreakStage.StoppingAmds, "Stopping Apple Mobile Device Service...", 10);
+            Report(JailbreakStage.StoppingAmds, "Stopping Apple Mobile Device Service for the active jailbreak transaction...", 10);
             await StopAmdsIfPresentAsync(toolchain, cancellationToken).ConfigureAwait(false);
 
             if (_usbipdService.DetectsUsbDkConflict())
             {
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message =
-                        "UsbDk filter is installed — NOT required for jailbreak and conflicts with usbipd. " +
-                        "Original success used libusbK only. Prefer uninstalling UsbDk; binds use --force meanwhile.",
-                    IsError = false,
-                });
+                Emit(
+                    "orchestrator",
+                    "UsbDk is installed and can conflict with usbipd. The operation will use explicit ownership handoffs; uninstall UsbDk if WSL attach continues to fail.",
+                    isError: true);
             }
 
-            // Do NOT detach usbipd before DFU helper - palera1n -D needs the phone inside WSL.
-            Report(JailbreakStage.EnsuringDfuDriver, "Waiting for Apple DFU (05AC:1227)...", 20);
-            var alreadyPongo = IsPongoPresent();
-            if (!alreadyPongo)
+            _monitor.PollNow();
+            if (_monitor.CurrentDevice.Mode == DeviceMode.PwnedDfu)
             {
-                var inDfu = await WaitForDfuAsync(toolchain, cancellationToken).ConfigureAwait(false);
-                if (!inDfu)
+                Fail("A stale gaster PWND state was detected. This backend requires clean DFU or YOLO-compatible DFU. Force-reboot, re-enter clean DFU, then retry.");
+                return JailbreakStage.Failed;
+            }
+
+            if (!IsPongoPresent())
+            {
+                Report(JailbreakStage.EnsuringDfuDriver, "Waiting for clean Apple DFU (05AC:1227)...", 18);
+                if (!await WaitForDfuAsync(toolchain, cancellationToken).ConfigureAwait(false))
                 {
-                    Fail("Device never entered DFU. Unplug/replug, then retry. Use Device tab to confirm mode.");
                     return JailbreakStage.Failed;
                 }
 
-                // Host must own DFU for openra1n. Detach alone leaves VBoxUSB stub bound —
-                // openra1n then ACCESS_VIOLATIONs after YOLO. Unbind + kill leftover bridges.
-                Report(JailbreakStage.DetachingUsbipd, "Handing DFU back to Windows for openra1n...", 22);
-                UsbipdService.KillLeftoverUsbBridges();
-                if (_usbipdService.IsAvailable)
+                Report(JailbreakStage.DetachingUsbipd, "Transferring DFU ownership from WSL to Windows...", 22);
+                if (!ReleaseAppleToWindows())
                 {
-                    var release = _usbipdService.ReleaseAppleToHost();
-                    if (!string.IsNullOrWhiteSpace(release.Message))
-                    {
-                        ForwardLog(this, new LogLine
-                        {
-                            Source = "usbipd",
-                            Message = release.Message.Trim(),
-                            IsError = !release.Succeeded,
-                        });
-                    }
-
-                    if (!release.Succeeded)
-                    {
-                        Fail(release.Message);
-                        return JailbreakStage.Failed;
-                    }
+                    return JailbreakStage.Failed;
                 }
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
 
-                // Re-enumeration after unbind; stub must leave before libusbK/openra1n.
-                await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
-
-                // Step 1: Install libusbK FIRST (no watchdog running — avoids two wdi-simple
-                // instances clashing, which causes the orchestrator to give up while the
-                // watchdog succeeds 1s later).
-                Report(JailbreakStage.EnsuringDfuDriver, "Ensuring DFU libusbK driver...", 25);
-                var dfuReady = await EnsureModeDriverAsync(
-                    DeviceMode.Dfu,
-                    0x1227,
-                    cancellationToken).ConfigureAwait(false);
-
-                if (!dfuReady)
+                Report(JailbreakStage.EnsuringDfuDriver, "Verifying the DFU host driver transaction...", 28);
+                if (!await EnsureModeDriverAsync(DeviceMode.Dfu, 0x1227, allowWinUsb: false, cancellationToken)
+                        .ConfigureAwait(false))
                 {
-                    Fail(
-                        "DFU libusbK driver is not ready (must not be VBoxUSB/usbipd stub). " +
-                        "In Zadig: Apple DFU -> libusbK -> Replace Driver, wait for SUCCESS.");
                     return JailbreakStage.Failed;
                 }
 
-                // Final host-driver gate before openra1n (reject VBoxUSB even if prior check raced).
-                _monitor.PollNow();
-                var dfuDevice = _monitor.ScanDevices()
-                    .FirstOrDefault(d => d.IsPresent && d.ProductId == 0x1227 && d.Mode is not DeviceMode.Busy);
-                var dfuService = dfuDevice is null ? null : DriverInstaller.DetectService(dfuDevice);
-                if (dfuDevice is null)
-                {
-                    Fail("DFU disappeared after driver setup. Re-enter DFU and retry.");
-                    return JailbreakStage.Failed;
-                }
-
-                if (DriverInstaller.IsUsbipdStubService(dfuService) ||
+                var dfu = FindDevice(0x1227);
+                var dfuService = dfu is null ? null : DriverInstaller.DetectService(dfu);
+                if (dfu is null || DriverInstaller.IsUsbipdStubService(dfuService) ||
                     !DriverInstaller.IsLibusbKService(dfuService))
                 {
-                    Fail(
-                        $"Refusing openra1n: DFU service is '{dfuService ?? "unknown"}' " +
-                        "(need libusbK, not VBoxUSB/usbipd).");
+                    Fail($"Refusing openra1n: DFU host service is '{dfuService ?? "missing"}'. It must be libusbK and owned by Windows.");
                     return JailbreakStage.Failed;
                 }
+                Emit("orchestrator", $"DFU transaction ready: mode={dfu.Mode}, service={dfuService}, owner=Windows.");
 
-                ForwardLog(this, new LogLine
+                Report(JailbreakStage.RunningOpenRa1n, "Running openra1n until PongoOS enumerates...", 40);
+                var pongoReached = await _openRa1nService.RunUntilPongoAsync(toolchain, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!pongoReached)
                 {
-                    Source = "orchestrator",
-                    Message = $"DFU host driver OK: {dfuService} (mode={dfuDevice.Mode})",
-                });
-
-                // Step 2: NOW start the watchdog — it keeps libusbK alive during openra1n
-                // re-enumerations (Windows flips to WinUSB on every re-enum). The initial
-                // install is already done, so the watchdog only fires if openra1n causes a flip.
-                using var driverWatch = new LibusbKWatchdog(_monitor, _settings);
-                driverWatch.LogReceived += ForwardLog;
-                driverWatch.Start();
-                try
-                {
-                    Report(JailbreakStage.RunningOpenRa1n, "Running openra1n until PongoOS...", 40);
-                    var pongoReached = await _openRa1nService.RunUntilPongoAsync(toolchain, cancellationToken)
-                        .ConfigureAwait(false);
-
-                    if (!pongoReached)
-                    {
-                        Fail(
-                            "PongoOS USB (05AC:4141) not seen in time after openra1n. " +
-                            "If Device tab already shows PongoOS, just Start Jailbreak again — it will skip openra1n.");
-                        return JailbreakStage.Failed;
-                    }
-
-                    Report(JailbreakStage.EnsuringPongoDriver, "Ensuring PongoOS driver...", 60);
-                    var pongoReady = await EnsureModeDriverAsync(
-                        DeviceMode.Pongo,
-                        0x4141,
-                        cancellationToken,
-                        allowWinUsb: true).ConfigureAwait(false);
-
-                    if (!pongoReady)
-                    {
-                        Fail("PongoOS driver is not ready.");
-                        return JailbreakStage.Failed;
-                    }
-                }
-                finally
-                {
-                    driverWatch.LogReceived -= ForwardLog;
-                    driverWatch.Stop();
+                    Fail("PongoOS USB 05AC:4141 was not detected after openra1n. No background driver-reinstall loop was started; inspect the exact final mode and driver in Device/Logs.");
+                    return JailbreakStage.Failed;
                 }
             }
             else
             {
-                Report(JailbreakStage.RunningOpenRa1n, "PongoOS already present - skipping openra1n.", 40);
-                UsbipdService.KillLeftoverUsbBridges();
-                if (_usbipdService.IsAvailable)
+                Report(JailbreakStage.RunningOpenRa1n, "PongoOS is already present; skipping openra1n.", 45);
+                if (!ReleaseAppleToWindows())
                 {
-                    _usbipdService.ReleaseAppleToHost();
-                }
-
-                Report(JailbreakStage.EnsuringPongoDriver, "Ensuring PongoOS driver...", 60);
-                using var pongoWatch = new LibusbKWatchdog(_monitor, _settings);
-                pongoWatch.LogReceived += ForwardLog;
-                pongoWatch.Start();
-                try
-                {
-                    var pongoReady = await EnsureModeDriverAsync(
-                        DeviceMode.Pongo,
-                        0x4141,
-                        cancellationToken,
-                        allowWinUsb: true).ConfigureAwait(false);
-
-                    if (!pongoReady)
-                    {
-                        Fail("PongoOS driver is not ready.");
-                        return JailbreakStage.Failed;
-                    }
-                }
-                finally
-                {
-                    pongoWatch.LogReceived -= ForwardLog;
-                    pongoWatch.Stop();
+                    return JailbreakStage.Failed;
                 }
             }
 
-            Report(JailbreakStage.RunningPalera1n, "Running palera1n payloads...", 75);
+            Report(JailbreakStage.EnsuringPongoDriver, "Verifying the PongoOS host driver transaction...", 60);
+            if (!await EnsureModeDriverAsync(DeviceMode.Pongo, 0x4141, allowWinUsb: true, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return JailbreakStage.Failed;
+            }
+
+            var pongo = FindDevice(0x4141);
+            var pongoService = pongo is null ? null : DriverInstaller.DetectService(pongo);
+            Emit(
+                "orchestrator",
+                $"PongoOS transaction ready: service={pongoService ?? "unknown"}, owner=Windows. The palera1n launcher will perform the explicit Windows-to-WSL payload handoff.");
+
+            Report(JailbreakStage.RunningPalera1n, "Running palera1n payloads through the controlled WSL handoff...", 75);
             var options = JailbreakOptions.FromSettings(_settings);
             var exitCode = await _palera1nHostService.RunPalera1nAsync(toolchain, options, cancellationToken)
                 .ConfigureAwait(false);
-
             if (exitCode != 0)
             {
                 Fail($"palera1n exited with code {exitCode}.");
@@ -259,18 +172,22 @@ public sealed class JailbreakOrchestrator : IDisposable
             Report(JailbreakStage.Cancelled, "Jailbreak cancelled.", 100);
             return JailbreakStage.Cancelled;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Fail(ex.Message);
+            Fail(exception.Message);
             return JailbreakStage.Failed;
+        }
+        finally
+        {
+            UsbipdService.KillLeftoverUsbBridges();
         }
     }
 
     private async Task<bool> EnsureModeDriverAsync(
         DeviceMode requiredMode,
         ushort productId,
-        CancellationToken cancellationToken,
-        bool allowWinUsb = false)
+        bool allowWinUsb,
+        CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(3);
         var offeredManualZadig = false;
@@ -278,14 +195,7 @@ public sealed class JailbreakOrchestrator : IDisposable
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _monitor.PollNow();
-
-            var device = _monitor.ScanDevices()
-                .FirstOrDefault(d =>
-                    d.ProductId == productId &&
-                    d.IsPresent &&
-                    d.Mode is not DeviceMode.Busy);
-
+            var device = FindDevice(productId);
             if (device is null)
             {
                 await Task.Delay(750, cancellationToken).ConfigureAwait(false);
@@ -294,56 +204,49 @@ public sealed class JailbreakOrchestrator : IDisposable
 
             if (device.Mode == DeviceMode.PwnedDfu)
             {
-                Fail("Gaster PWND without YOLO cannot boot Pongo. Force-reboot into clean DFU.");
+                Fail("Gaster PWND without a YOLO-compatible handoff cannot boot this Pongo path. Force-reboot into clean DFU.");
                 return false;
             }
 
-            if (device.Mode != requiredMode && requiredMode == DeviceMode.Dfu &&
-                device.Mode == DeviceMode.YoloDfu)
-            {
-                // YOLO DFU is acceptable for openra1n (skips exploit, boots Pongo).
-            }
-            else if (device.Mode != requiredMode && requiredMode == DeviceMode.Dfu)
+            var modeAccepted = device.Mode == requiredMode ||
+                               (requiredMode == DeviceMode.Dfu && device.Mode == DeviceMode.YoloDfu);
+            if (!modeAccepted)
             {
                 await Task.Delay(750, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
-            var service = DriverInstaller.DetectService(device);
+            var service = DriverInstaller.ResolveServiceName(device.DeviceId) ?? DriverInstaller.DetectService(device);
             if (DriverInstaller.IsUsbipdStubService(service))
             {
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message =
-                        $"Apple PID 0x{productId:X4} still on usbipd stub ({service}). " +
-                        "Releasing usbipd bind and reinstalling libusbK...",
-                    IsError = true,
-                });
-
-                UsbipdService.KillLeftoverUsbBridges();
-                if (_usbipdService.IsAvailable)
-                {
-                    _usbipdService.ReleaseAppleToHost();
-                }
-
+                Emit(
+                    "orchestrator",
+                    $"Apple PID 0x{productId:X4} is still owned by usbipd ({service}); releasing it before driver verification.",
+                    isError: true);
+                if (!ReleaseAppleToWindows()) return false;
                 await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
-                // Fall through to EnsureLibusbKAsync — do not treat stub as ready.
+                continue;
             }
-            else if (DriverInstaller.IsLibusbKService(service) ||
-                     (allowWinUsb && DriverInstaller.IsWinUsbService(service)))
+
+            if (DriverInstaller.IsLibusbKService(service) ||
+                (allowWinUsb && DriverInstaller.IsWinUsbService(service)))
             {
+                Emit("driver", $"PID 0x{productId:X4} already has acceptable service '{service}'. No reinstall needed.");
                 return true;
             }
 
             var result = await _driverInstaller.EnsureLibusbKAsync(
                 productId,
-                new Progress<ProgressEventArgs>(p => ProgressChanged?.Invoke(this, p)),
+                new Progress<ProgressEventArgs>(progress => ProgressChanged?.Invoke(this, progress)),
                 cancellationToken).ConfigureAwait(false);
 
-            if (result == DriverInstallResult.AlreadyOk || result == DriverInstallResult.Installed)
+            if (result is DriverInstallResult.AlreadyOk or DriverInstallResult.Installed)
             {
-                return true;
+                if (await WaitForAcceptedDriverAsync(productId, allowWinUsb, TimeSpan.FromSeconds(35), cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    return true;
+                }
             }
 
             if (result == DriverInstallResult.NeedsManualZadig && !offeredManualZadig && _userPrompts is not null)
@@ -353,12 +256,10 @@ public sealed class JailbreakOrchestrator : IDisposable
                 var openZadig = await _userPrompts.ConfirmAsync(
                     new UserPromptRequest
                     {
-                        Title = "libusbK driver needed",
+                        Title = "Apple USB driver transaction needs manual repair",
                         Message =
-                            $"Automated libusbK install did not stick for Apple USB PID 0x{productId:X4}.\n\n" +
-                            "Click OK to open Zadig. In Zadig you MUST select the Apple DFU/Pongo device " +
-                            $"(VID 05AC PID {productId:X4}) — not your mouse/keyboard — then choose libusbK → Replace Driver.\n\n" +
-                            "Click Cancel to abort.",
+                            $"Automated libusbK installation did not verify for Apple VID 05AC PID {productId:X4}.\n\n" +
+                            "Open Zadig only for this exact Apple DFU/Pongo device, select libusbK, and replace the driver. Never select a mouse, keyboard, storage device, or normal-mode Apple device.",
                         ConfirmText = "Open Zadig",
                         CancelText = "Cancel",
                     },
@@ -366,42 +267,36 @@ public sealed class JailbreakOrchestrator : IDisposable
 
                 if (!openZadig || toolchain is null)
                 {
-                    Fail("libusbK is required and was not installed.");
+                    Fail("The required Apple USB binding was not installed.");
                     return false;
                 }
 
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message =
-                        $"Opening Zadig — select Apple device PID {productId:X4} → libusbK → Replace Driver.",
-                });
                 _driverInstaller.LaunchZadig(toolchain);
-
-                if (await WaitForLibusbKOnlyAsync(productId, TimeSpan.FromMinutes(6), cancellationToken)
+                if (await WaitForAcceptedDriverAsync(productId, allowWinUsb, TimeSpan.FromMinutes(6), cancellationToken)
                         .ConfigureAwait(false))
                 {
                     return true;
                 }
-
-                Fail("libusbK still not active after Zadig wait.");
+                Fail("The required Apple USB binding still did not verify after the Zadig repair window.");
                 return false;
             }
 
             if (result == DriverInstallResult.Failed)
             {
-                Fail($"Driver install failed for PID 0x{productId:X4}.");
+                Fail($"Driver transaction failed for Apple PID 0x{productId:X4}.");
                 return false;
             }
 
             await Task.Delay(750, cancellationToken).ConfigureAwait(false);
         }
 
+        Fail($"Timed out verifying the driver transaction for Apple PID 0x{productId:X4}.");
         return false;
     }
 
-    private async Task<bool> WaitForLibusbKOnlyAsync(
+    private async Task<bool> WaitForAcceptedDriverAsync(
         ushort productId,
+        bool allowWinUsb,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -409,17 +304,18 @@ public sealed class JailbreakOrchestrator : IDisposable
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _monitor.PollNow();
-            var device = _monitor.ScanDevices()
-                .FirstOrDefault(d => d.ProductId == productId && d.IsPresent);
-            if (device is not null && DriverInstaller.IsLibusbKService(DriverInstaller.DetectService(device)))
+            var device = FindDevice(productId);
+            if (device is not null)
             {
-                return true;
+                var service = DriverInstaller.ResolveServiceName(device.DeviceId) ?? DriverInstaller.DetectService(device);
+                if (DriverInstaller.IsLibusbKService(service) ||
+                    (allowWinUsb && DriverInstaller.IsWinUsbService(service)))
+                {
+                    return true;
+                }
             }
-
             await Task.Delay(750, cancellationToken).ConfigureAwait(false);
         }
-
         return false;
     }
 
@@ -427,326 +323,198 @@ public sealed class JailbreakOrchestrator : IDisposable
     {
         _monitor.PollNow();
         var current = _monitor.CurrentDevice;
-        if (current is not null &&
-            current.ProductId == 0x1227 &&
-            current.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu)
+        if (current.ProductId == 0x1227 && current.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu)
+        {
+            return true;
+        }
+        if (current.Mode == DeviceMode.PwnedDfu)
+        {
+            Fail("Stale gaster PWND was detected. Force-reboot into clean DFU before continuing.");
+            return false;
+        }
+        if (current.Mode == DeviceMode.Pongo)
         {
             return true;
         }
 
-        if (current is not null && current.Mode == DeviceMode.Pongo)
+        if (!_usbipdService.IsAvailable)
         {
-            ForwardLog(this, new LogLine
-            {
-                Source = "orchestrator",
-                Message = "PongoOS already present - skipping DFU/openra1n.",
-            });
-            return true;
+            Fail("usbipd-win is required for the guided normal/recovery-to-DFU helper. Install usbipd-win or enter DFU manually before pressing Start Jailbreak.");
+            return false;
         }
 
-        // If Normal/Recovery, attach into WSL first, then kick palera1n DFU helper (-D).
-        if (current is null ||
-            current.Mode is DeviceMode.Normal or DeviceMode.Recovery or DeviceMode.None or DeviceMode.Busy)
+        const int maxAttempts = 4;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            if (!_usbipdService.IsAvailable)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (HostHasDfuDevice() || IsPongoPresent()) return true;
+
+            var wsl = new WslService(_settings.WslDistro);
+            var attachProgress = new Progress<string>(message => Emit("usbipd", message));
+            Report(
+                JailbreakStage.EnsuringDfuDriver,
+                attempt == 1
+                    ? "Temporarily attaching Apple USB to WSL for the guided DFU helper..."
+                    : $"Guided DFU retry {attempt}/{maxAttempts}: attaching Apple USB to WSL...",
+                18);
+
+            var attach = await _usbipdService.EnsureAppleAttachedToWslAsync(
+                _settings.WslDistro,
+                wsl,
+                attachProgress,
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(45)).ConfigureAwait(false);
+            if (!attach.Succeeded)
             {
-                Fail("usbipd-win is required for DFU helper. Install dorssel.usbipd-win and relaunch as admin.");
+                Emit("usbipd", attach.Message, isError: true);
+                UsbipdService.KillLeftoverUsbBridges();
+                if (attempt == maxAttempts)
+                {
+                    Fail(attach.Message);
+                    return false;
+                }
+                await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            var dfuMissed = false;
+            var promptSeen = false;
+            void ObserveDfuLog(object? sender, LogLine line)
+            {
+                if (line.Message.Contains("Whoops, device did not enter DFU mode", StringComparison.OrdinalIgnoreCase))
+                    dfuMissed = true;
+                if (line.Message.Contains("Press Enter when ready for DFU mode", StringComparison.OrdinalIgnoreCase))
+                    promptSeen = true;
+            }
+
+            _palera1nHostService.LogReceived += ObserveDfuLog;
+            using var helperCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var helperEndedNaturally = false;
+            var helperExit = 0;
+            try
+            {
+                var started = DateTimeOffset.UtcNow;
+                DateTimeOffset? missedAt = null;
+                var helperTask = _palera1nHostService.RunDfuHelperAsync(
+                    toolchainRoot,
+                    _settings.WslDistro,
+                    helperCts.Token);
+
+                while (!helperTask.IsCompleted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (HostHasDfuDevice() || IsPongoPresent())
+                    {
+                        helperCts.Cancel();
+                        break;
+                    }
+
+                    if (dfuMissed)
+                    {
+                        missedAt ??= DateTimeOffset.UtcNow;
+                        if (DateTimeOffset.UtcNow - missedAt > TimeSpan.FromSeconds(8))
+                        {
+                            Emit("orchestrator", "The DFU timing attempt was missed; stopping the helper instead of allowing an infinite reconnect loop.", isError: true);
+                            helperCts.Cancel();
+                            break;
+                        }
+                    }
+                    else if (!promptSeen && DateTimeOffset.UtcNow - started > TimeSpan.FromSeconds(30))
+                    {
+                        Emit("orchestrator", "The DFU helper did not reach its prompt within 30 seconds; stopping the stale WSL/device-event wait.", isError: true);
+                        helperCts.Cancel();
+                        break;
+                    }
+
+                    await Task.WhenAny(helperTask, Task.Delay(750, cancellationToken)).ConfigureAwait(false);
+                }
+
+                try
+                {
+                    helperExit = await helperTask.ConfigureAwait(false);
+                    helperEndedNaturally = !HostHasDfuDevice() && !IsPongoPresent();
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Intentional bounded stop after DFU success or a known stale helper state.
+                }
+            }
+            finally
+            {
+                _palera1nHostService.LogReceived -= ObserveDfuLog;
+                UsbipdService.KillLeftoverUsbBridges();
+            }
+
+            if (HostHasDfuDevice() || IsPongoPresent()) return true;
+            if (helperEndedNaturally && helperExit != 0 && !dfuMissed)
+            {
+                Fail($"The DFU helper failed with exit code {helperExit}; this was not a button-timing miss.");
                 return false;
             }
 
-            // palera1n -D over usbipd is flaky: it often prints "Whoops, device did not
-            // enter DFU mode" and then loops forever on "Waiting for device to reconnect",
-            // and it can also hang at "Entering recovery mode" when the re-enumerated
-            // device isn't re-attached to WSL. Both are exactly the hangs you hit and had
-            // to fix with a manual Cancel + Start Jailbreak. This loop automates that:
-            // it monitors the host, auto-continues the moment the device is really in DFU
-            // (openra1n does its own checkm8 from clean DFU), and otherwise force-stops a
-            // stuck helper and retries the whole DFU dance a bounded number of times.
-            const int maxDfuAttempts = 4;
-            var dfuReached = false;
-
-            for (var attempt = 1; attempt <= maxDfuAttempts && !dfuReached; attempt++)
+            if (attempt < maxAttempts)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Device may already be in DFU/Pongo (a prior attempt landed it, or the
-                // user entered DFU manually) — skip straight to openra1n.
-                if (HostHasDfuDevice() || IsPongoPresent())
-                {
-                    dfuReached = true;
-                    break;
-                }
-
-                var wsl = new WslService(_settings.WslDistro);
-                var attachProgress = new Progress<string>(msg => ForwardLog(this, new LogLine
-                {
-                    Source = "usbipd",
-                    Message = msg,
-                }));
-
-                Report(
-                    JailbreakStage.EnsuringDfuDriver,
-                    attempt == 1
-                        ? "Attaching Apple USB to WSL (required for Waiting for devices)..."
-                        : $"DFU retry {attempt}/{maxDfuAttempts}: re-attaching Apple USB to WSL...",
-                    18);
-
-                var attach = await _usbipdService.EnsureAppleAttachedToWslAsync(
-                    _settings.WslDistro,
-                    wsl,
-                    attachProgress,
-                    cancellationToken).ConfigureAwait(false);
-
-                if (!attach.Succeeded)
-                {
-                    if (attempt == 1)
-                    {
-                        Fail(attach.Message);
-                        if (attach.UsbDkDetected)
-                        {
-                            ForwardLog(this, new LogLine
-                            {
-                                Source = "usbipd",
-                                Message =
-                                    "UsbDk conflicts with usbipd. Uninstall UsbDk (Add/Remove Programs), reboot, then retry.",
-                                IsError = true,
-                            });
-                        }
-
-                        return false;
-                    }
-
-                    ForwardLog(this, new LogLine
-                    {
-                        Source = "usbipd",
-                        Message = $"{attach.Message} — retrying attach...",
-                        IsError = true,
-                    });
-                    UsbipdService.KillLeftoverUsbBridges();
-                    await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                ForwardLog(this, new LogLine { Source = "orchestrator", Message = attach.Message });
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message = attempt == 1
-                        ? "Starting DFU helper. When palera1n prints \"Press Enter when ready for DFU mode\", an OK/Cancel dialog will appear — not before."
-                        : $"Starting DFU helper (attempt {attempt}/{maxDfuAttempts}). Get ready for the button sequence again when the dialog appears.",
-                });
-
-                var dfuMissed = false;
-                var dfuPromptShown = false;
-                void OnDfuLog(object? sender, LogLine line)
-                {
-                    if (line.Message.Contains("Whoops, device did not enter DFU mode", StringComparison.OrdinalIgnoreCase))
-                    {
-                        dfuMissed = true;
-                    }
-                    else if (line.Message.Contains("Press Enter when ready for DFU mode", StringComparison.OrdinalIgnoreCase))
-                    {
-                        dfuPromptShown = true;
-                    }
-                }
-
-                _palera1nHostService.LogReceived += OnDfuLog;
-
-                using var helperCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var helperExit = 0;
-                var helperEndedNaturally = false;
-                try
-                {
-                    var attemptStart = DateTimeOffset.UtcNow;
-                    var helperTask = _palera1nHostService.RunDfuHelperAsync(
-                        toolchainRoot,
-                        _settings.WslDistro,
-                        helperCts.Token);
-
-                    // Only give up on an attempt AFTER "Whoops" (the user is no longer
-                    // holding buttons by then), so we never cut off a valid countdown.
-                    DateTimeOffset? missedAt = null;
-                    while (!helperTask.IsCompleted)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                        if (HostHasDfuDevice() || IsPongoPresent())
-                        {
-                            dfuReached = true;
-                            ForwardLog(this, new LogLine
-                            {
-                                Source = "orchestrator",
-                                Message = "Device is in DFU on Windows — stopping the DFU helper and continuing to openra1n automatically.",
-                            });
-                            helperCts.Cancel();
-                            break;
-                        }
-
-                        if (dfuMissed)
-                        {
-                            missedAt ??= DateTimeOffset.UtcNow;
-                            if (DateTimeOffset.UtcNow - missedAt > TimeSpan.FromSeconds(8))
-                            {
-                                ForwardLog(this, new LogLine
-                                {
-                                    Source = "orchestrator",
-                                    Message = "palera1n missed DFU and is looping on \"Waiting for device to reconnect\" — stopping this attempt.",
-                                    IsError = true,
-                                });
-                                helperCts.Cancel();
-                                break;
-                            }
-                        }
-                        else if (!dfuPromptShown && DateTimeOffset.UtcNow - attemptStart > TimeSpan.FromSeconds(30))
-                        {
-                            // palera1n's own "Entering recovery mode" wait has NO timeout of its
-                            // own (dfuhelper.c blocks on a usbmuxd/libirecovery device-event that
-                            // never fires if the bridge misses the Normal->Recovery re-enumeration).
-                            // This is the exact hang you hit twice — stop and retry instead of
-                            // waiting forever for an event that isn't coming.
-                            ForwardLog(this, new LogLine
-                            {
-                                Source = "orchestrator",
-                                Message = "palera1n has not reached the DFU prompt yet (likely stuck entering recovery mode — the device re-enumeration was probably missed). Stopping this attempt.",
-                                IsError = true,
-                            });
-                            helperCts.Cancel();
-                            break;
-                        }
-
-                        // Wake as soon as the helper finishes OR ~750ms elapses to re-poll.
-                        await Task.WhenAny(helperTask, Task.Delay(750, cancellationToken)).ConfigureAwait(false);
-                    }
-
-                    try
-                    {
-                        helperExit = await helperTask.ConfigureAwait(false);
-                        helperEndedNaturally = !dfuReached;
-                    }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        // Expected: we intentionally stopped the helper (DFU reached or stuck loop).
-                    }
-                }
-                finally
-                {
-                    _palera1nHostService.LogReceived -= OnDfuLog;
-                }
-
-                // A force-stopped helper can't run its own cleanup, so clear any orphaned
-                // elevated USB bridge before the next attempt / before openra1n.
-                UsbipdService.KillLeftoverUsbBridges();
-
-                if (dfuReached || HostHasDfuDevice())
-                {
-                    dfuReached = true;
-                    break;
-                }
-
-                // Helper ended on its own with an error that isn't a DFU-timing miss
-                // (e.g. FIFO/GUI-prompt failure, runtime missing) — retrying won't help.
-                if (helperEndedNaturally && helperExit != 0 && !dfuMissed)
-                {
-                    Fail($"DFU helper failed with exit code {helperExit} (not a DFU timing miss). See the log above.");
-                    return false;
-                }
-
-                if (attempt < maxDfuAttempts)
-                {
-                    ForwardLog(this, new LogLine
-                    {
-                        Source = "orchestrator",
-                        Message = $"DFU not entered (attempt {attempt}/{maxDfuAttempts}). Retrying automatically — a new DFU prompt will appear shortly.",
-                    });
-                    await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    Fail(
-                        $"Device did not enter DFU after {maxDfuAttempts} automatic attempts. " +
-                        "iPhone 8/X sequence: hold Side + Volume Down together ~8s, then release Side but KEEP holding Volume Down until the screen stays black, then click OK. Click Start Jailbreak to try again.");
-                    return false;
-                }
+                Emit("orchestrator", $"DFU was not reached on attempt {attempt}/{maxAttempts}; retrying with a fresh ownership transaction.");
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        // Require a real present DFU device (not Busy/Error ghosts).
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
-        var lastHint = DateTimeOffset.MinValue;
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2);
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _monitor.PollNow();
-            var d = _monitor.ScanDevices()
-                .FirstOrDefault(x =>
-                    x.IsPresent &&
-                    x.ProductId == 0x1227 &&
-                    x.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu);
-
-            if (d is not null)
-            {
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message = $"DFU confirmed on host ({d.Mode}).",
-                });
-                return true;
-            }
-
-            if (IsPongoPresent())
-            {
-                return true;
-            }
-
-            if ((DateTimeOffset.UtcNow - lastHint).TotalSeconds >= 10)
-            {
-                lastHint = DateTimeOffset.UtcNow;
-                ForwardLog(this, new LogLine
-                {
-                    Source = "orchestrator",
-                    Message = "Still waiting for DFU (05AC:1227) on Windows after helper...",
-                });
-            }
-
+            if (HostHasDfuDevice() || IsPongoPresent()) return true;
             await Task.Delay(750, cancellationToken).ConfigureAwait(false);
         }
 
-        Fail("DFU device never appeared on Windows. Do not continue to openra1n/Zadig without DFU.");
+        Fail("DFU never appeared on Windows. The app will not continue to openra1n or driver installation without a real 05AC:1227 device.");
         return false;
+    }
+
+    private bool ReleaseAppleToWindows()
+    {
+        UsbipdService.KillLeftoverUsbBridges();
+        if (!_usbipdService.IsAvailable) return true;
+
+        var result = _usbipdService.ReleaseAppleToHost();
+        if (!string.IsNullOrWhiteSpace(result.Message))
+        {
+            Emit("usbipd", result.Message.Trim(), isError: !result.Succeeded);
+        }
+        if (!result.Succeeded)
+        {
+            Fail(result.Message);
+            return false;
+        }
+        return true;
+    }
+
+    private AppleUsbDevice? FindDevice(ushort productId)
+    {
+        _monitor.PollNow();
+        return _monitor.ScanDevices()
+            .FirstOrDefault(device =>
+                device.IsPresent &&
+                device.ProductId == productId &&
+                device.Mode is not DeviceMode.Busy);
     }
 
     private bool IsPongoPresent()
     {
-        _monitor.PollNow();
-        if (_monitor.ScanDevices().Any(x => x.ProductId == 0x4141 && !string.IsNullOrWhiteSpace(x.DeviceId)))
-        {
-            return true;
-        }
-
+        if (FindDevice(0x4141) is not null) return true;
         return _monitor.IsPongoVisibleInUsbipd();
     }
 
-    /// <summary>
-    /// True when a real DFU device (05AC:1227) is present on the Windows host.
-    /// Used to short-circuit palera1n's flaky "Waiting for device to reconnect"
-    /// loop the moment the device is actually in DFU.
-    /// </summary>
     private bool HostHasDfuDevice()
     {
-        _monitor.PollNow();
-        return _monitor.ScanDevices().Any(d =>
-            d.IsPresent &&
-            d.ProductId == 0x1227 &&
-            d.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu);
+        var device = FindDevice(0x1227);
+        return device?.Mode is DeviceMode.Dfu or DeviceMode.YoloDfu;
     }
 
     private static async Task StopAmdsIfPresentAsync(string toolchainRoot, CancellationToken cancellationToken)
     {
         var script = Paths.GetStopAmdsScript(toolchainRoot);
-        if (!File.Exists(script))
-        {
-            return;
-        }
+        if (!File.Exists(script)) return;
 
         await ProcessRunner.RunAsync(
             "powershell.exe",
@@ -758,25 +526,25 @@ public sealed class JailbreakOrchestrator : IDisposable
     private void Report(JailbreakStage stage, string message, int percent)
     {
         ProgressChanged?.Invoke(this, new ProgressEventArgs(stage.ToString(), message, percent));
-        ForwardLog(this, new LogLine { Source = "orchestrator", Message = message });
+        Emit("orchestrator", message);
     }
 
     private void Fail(string message)
     {
-        ForwardLog(this, new LogLine { Source = "orchestrator", Message = message, IsError = true });
+        Emit("orchestrator", message, isError: true);
         ProgressChanged?.Invoke(this, new ProgressEventArgs(JailbreakStage.Failed.ToString(), message, 100));
     }
 
-    private void ForwardLog(object? sender, LogLine line)
-    {
-        LogReceived?.Invoke(this, line);
-    }
+    private void Emit(string source, string message, bool isError = false) =>
+        LogReceived?.Invoke(this, new LogLine { Source = source, Message = message, IsError = isError });
+
+    private void ForwardLog(object? sender, LogLine line) => LogReceived?.Invoke(this, line);
 
     public void Dispose()
     {
         _openRa1nService.LogReceived -= ForwardLog;
         _palera1nHostService.LogReceived -= ForwardLog;
         _openRa1nService.Dispose();
-        _monitor.Dispose();
+        if (_ownsMonitor) _monitor.Dispose();
     }
 }
