@@ -16,6 +16,7 @@ public partial class DowngradeView
         _experienceHooksWired = true;
         InitializeDowngradeExperience();
         InitializeOperationalExperience();
+        InitializeBootProfiles();
         WireOperationalDeferredHooks();
 
         StartDowngradeButton.Click -= StartDowngrade_Click;
@@ -50,10 +51,13 @@ public partial class DowngradeView
     private async void Experience_Loaded(object sender, RoutedEventArgs e)
     {
         InitializeOperationalExperience();
+        InitializeBootProfiles();
         WireOperationalDeferredHooks();
         try
         {
-            UpdateExperienceDeviceState(await _monitor.ProbeAsync());
+            var snapshot = await _monitor.ProbeAsync();
+            UpdateExperienceDeviceState(snapshot);
+            await RefreshBootProfileAsync(snapshot);
         }
         catch (Exception exception)
         {
@@ -122,6 +126,10 @@ public partial class DowngradeView
             ResumeSessionButton.IsEnabled = !hardwareBusy && !_busy && _recoveryCandidate?.CanResume == true;
             RetryStageButton.IsEnabled = ResumeSessionButton.IsEnabled;
             ValidateHardwareButton.IsEnabled = !hardwareBusy && !_busy && toolchainReady;
+            if (_bootProfileHooksWired)
+            {
+                SetBootButtonEnabled(_bootAssetValidated && CanUseBootButton());
+            }
         }
         finally
         {
@@ -187,9 +195,10 @@ public partial class DowngradeView
 
             PtePathBox.Text = session.PteBlockPath ?? string.Empty;
             ShowPostDowngradeDashboard(session);
+            await SaveCompletedBootProfileAsync(session);
             await RefreshRecoveryStateAsync();
             ShowMessage(
-                $"Downgrade completed.\n\nSession: {session.SessionId}\nBoot asset: {session.PteBlockPath}\n\nThe post-downgrade dashboard is now verifying the device.",
+                $"Downgrade completed.\n\nSession: {session.SessionId}\nBoot asset: {session.PteBlockPath}\n\nThe exact-device cold-boot profile was validated and saved.",
                 "Downgrade complete",
                 MessageBoxImage.Information);
         }
