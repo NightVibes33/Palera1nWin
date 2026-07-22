@@ -19,11 +19,23 @@ public partial class DowngradeView
         InitializeBootProfiles();
         WireOperationalDeferredHooks();
 
+        // Replace every destructive/recovery entry point with the schema-2 exact
+        // ProductType+ECID gate. The original handlers remain private implementation
+        // details and are called only after the exact guard has been armed.
         StartDowngradeButton.Click -= StartDowngrade_Click;
-        StartDowngradeButton.Click += StartEnhancedDowngrade_Click;
+        StartDowngradeButton.Click -= StartEnhancedDowngrade_Click;
+        StartDowngradeButton.Click += StartIdentityBoundDowngrade_Click;
         StartDowngradeButton.IsEnabledChanged += EnhancedAction_IsEnabledChanged;
 
+        ValidateHardwareButton.Click -= ValidateHardware_Click;
+        ValidateHardwareButton.Click += ValidateExactHardware_Click;
+        ResumeSessionButton.Click -= ResumeSession_Click;
+        ResumeSessionButton.Click += ResumeIdentityBoundSession_Click;
+        RetryStageButton.Click -= RetryStage_Click;
+        RetryStageButton.Click += ResumeIdentityBoundSession_Click;
+
         _monitor.DeviceChanged += Experience_DeviceChanged;
+        _monitor.DeviceChanged += ExactValidation_DeviceChanged;
         IpswPathBox.TextChanged += ExperienceFirmwareChanged;
         FirmwareList.SelectionChanged += ExperienceFirmwareSelectionChanged;
         BackupEncryptedCheck.Checked += ExperienceSafetyChanged;
@@ -45,6 +57,7 @@ public partial class DowngradeView
         ProductTypeConfirmationBox.TextChanged += ExperienceProductTypeChanged;
 
         Loaded += Experience_Loaded;
+        RefreshExactHardwareValidationUi();
         RefreshEnhancedActionState();
     }
 
@@ -65,6 +78,7 @@ public partial class DowngradeView
         }
         await RefreshRecoveryStateAsync();
         RefreshHardwareValidationUi();
+        RefreshExactHardwareValidationUi();
         RefreshEnhancedActionState();
     }
 
@@ -73,6 +87,7 @@ public partial class DowngradeView
         {
             UpdateExperienceDeviceState(snapshot);
             RefreshHardwareValidationUi();
+            RefreshExactHardwareValidationUi();
             RefreshEnhancedActionState();
         });
 
@@ -115,15 +130,17 @@ public partial class DowngradeView
                                  File.Exists(Path.Combine(resources, "sep_racer.bin")) &&
                                  File.Exists(Path.Combine(resources, "kpf.bin"));
             var hardwareBusy = Shell?.HardwareOperations.Current.IsBusy == true;
+            var exactGateReady = LoadCurrentExactHardwareValidation() is not null;
             StartDowngradeButton.IsEnabled = !hardwareBusy &&
                                               !_busy &&
                                               confirmations &&
                                               toolchainReady &&
-                                              HasCurrentHardwareValidation() &&
+                                              exactGateReady &&
                                               IsActiveRestoreTargetReady() &&
                                               IsEnhancedSafetyReady();
             RunPreflightButton.IsEnabled = !hardwareBusy && !_busy && _preflightCts is null;
-            ResumeSessionButton.IsEnabled = !hardwareBusy && !_busy && _recoveryCandidate?.CanResume == true;
+            ResumeSessionButton.IsEnabled = !hardwareBusy && !_busy && _recoveryCandidate?.CanResume == true &&
+                                            (_recoveryCandidate.Session.HasBoundIdentity || exactGateReady);
             RetryStageButton.IsEnabled = ResumeSessionButton.IsEnabled;
             ValidateHardwareButton.IsEnabled = !hardwareBusy && !_busy && toolchainReady;
             if (_bootProfileHooksWired)
@@ -147,11 +164,11 @@ public partial class DowngradeView
                 MessageBoxImage.Information);
             return;
         }
-        if (!HasCurrentHardwareValidation())
+        if (LoadCurrentExactHardwareValidation() is null)
         {
             ShowMessage(
-                "Run Test DFU → PongoOS successfully before starting a destructive restore.",
-                "Hardware gate required",
+                "Run the exact-device Test DFU → PongoOS successfully before starting a destructive restore.",
+                "Exact hardware gate required",
                 MessageBoxImage.Warning);
             return;
         }
@@ -172,7 +189,7 @@ public partial class DowngradeView
         _operationCts = new CancellationTokenSource();
         var lease = await TryAcquireHardwareLeaseAsync(
             HardwareOperationKind.Downgrade,
-            "Full tethered downgrade using validated DFU/Pongo hardware",
+            "Full tethered downgrade using exact ECID-bound DFU/Pongo validation",
             _operationCts.Token);
         if (lease is null)
         {
@@ -181,7 +198,7 @@ public partial class DowngradeView
             return;
         }
 
-        SetBusy(true, "Starting downgrade", "Using the verified hardware gate and exact-device preflight report.");
+        SetBusy(true, "Starting downgrade", "Every later exact-identity device transition is guarded against target replacement.");
         RefreshEnhancedActionState();
 
         try
@@ -206,7 +223,7 @@ public partial class DowngradeView
         {
             var progress = new RestoreProgress(RestoreStage.Cancelled, OperationProgress.Value, "Paused", "The operation was paused. Hash-validated artifacts remain in the session folder.");
             HandleEnhancedProgress(progress);
-            AppendLog("Downgrade operation paused by the user.");
+            AppendLog("Downgrade operation paused or cancelled by the exact-device guard.");
         }
         catch (Exception exception)
         {
@@ -215,7 +232,7 @@ public partial class DowngradeView
             AppendLog(exception.ToString());
             var guidance = DowngradeFailureTranslator.Translate(exception.Message, stage);
             ShowMessage(
-                guidance.DisplayText + "\n\nRecovery will offer only hash-validated SHC/PTE artifacts.",
+                guidance.DisplayText + "\n\nRecovery will offer only hash-validated, identity-bound SHC/PTE artifacts.",
                 guidance.Title,
                 MessageBoxImage.Error);
         }
