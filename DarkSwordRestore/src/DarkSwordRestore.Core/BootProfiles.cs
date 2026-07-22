@@ -17,7 +17,11 @@ public sealed record DarkSwordBootProfile(
     string SepRacerSha256,
     string KpfSha256,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? IpswSha256 = null,
+    string? DisplayName = null,
+    string? Cpid = null,
+    string? Bdid = null);
 
 public sealed record BootProfileValidationResult(
     bool IsValid,
@@ -31,7 +35,7 @@ public sealed record BootProfileValidationResult(
 
 public sealed class DarkSwordBootProfileStore
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public DarkSwordBootProfileStore(string? rootDirectory = null)
@@ -57,6 +61,9 @@ public sealed class DarkSwordBootProfileStore
             throw new InvalidOperationException("The completed session does not contain a PTE path.");
         if (string.IsNullOrWhiteSpace(productType))
             throw new InvalidOperationException("ProductType is required for a cold-boot profile.");
+        if (string.IsNullOrWhiteSpace(ecid))
+            throw new InvalidOperationException(
+                "ECID was not captured. Re-enter DFU and retry profile creation; a ProductType-only profile is not safe for repeated cold boot.");
 
         var pte = Path.GetFullPath(session.PteBlockPath);
         var sep = Path.GetFullPath(sepRacerPath);
@@ -74,12 +81,12 @@ public sealed class DarkSwordBootProfileStore
             cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
-        var key = BuildKey(productType, ecid);
+        var normalizedEcid = NormalizeEcid(ecid)!;
         var profile = new DarkSwordBootProfile(
             CurrentSchemaVersion,
-            key,
+            BuildKey(productType, normalizedEcid),
             productType,
-            NormalizeEcid(ecid),
+            normalizedEcid,
             session.Ipsw.ProductVersion ?? "unknown",
             session.Ipsw.BuildVersion ?? "unknown",
             session.SessionId,
@@ -89,9 +96,15 @@ public sealed class DarkSwordBootProfileStore
             sepHash,
             kpfHash,
             now,
-            now);
+            now,
+            session.Ipsw.Sha256,
+            DarkSwordDeviceCatalog.Find(productType)?.DisplayName);
 
         await SaveAsync(profile, cancellationToken).ConfigureAwait(false);
+        await WriteProfileAsync(
+            Path.Combine(session.SessionDirectory, "boot-profile.json"),
+            profile,
+            cancellationToken).ConfigureAwait(false);
         return profile;
     }
 
@@ -99,12 +112,20 @@ public sealed class DarkSwordBootProfileStore
     {
         Directory.CreateDirectory(RootDirectory);
         var path = Path.Combine(RootDirectory, Sanitize(profile.Key) + ".json");
-        var temporary = path + ".tmp";
-        await File.WriteAllTextAsync(
-            temporary,
-            JsonSerializer.Serialize(profile with { UpdatedAt = DateTimeOffset.UtcNow }, JsonOptions),
+        await WriteProfileAsync(path, profile with { UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<DarkSwordBootProfile?> LoadAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(path)) return null;
+        await using var stream = File.OpenRead(path);
+        return await JsonSerializer.DeserializeAsync<DarkSwordBootProfile>(
+            stream,
+            JsonOptions,
             cancellationToken).ConfigureAwait(false);
-        File.Move(temporary, path, overwrite: true);
     }
 
     public async Task<DarkSwordBootProfile?> FindAsync(
@@ -114,27 +135,28 @@ public sealed class DarkSwordBootProfileStore
     {
         if (!Directory.Exists(RootDirectory)) return null;
         var normalizedEcid = NormalizeEcid(ecid);
-        DarkSwordBootProfile? best = null;
+        DarkSwordBootProfile? productFallback = null;
 
         foreach (var path in Directory.EnumerateFiles(RootDirectory, "*.json"))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await using var stream = File.OpenRead(path);
-                var profile = await JsonSerializer.DeserializeAsync<DarkSwordBootProfile>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken).ConfigureAwait(false);
+                var profile = await LoadAsync(path, cancellationToken).ConfigureAwait(false);
                 if (profile is null) continue;
 
-                var ecidMatch = !string.IsNullOrWhiteSpace(normalizedEcid) &&
-                                string.Equals(profile.Ecid, normalizedEcid, StringComparison.OrdinalIgnoreCase);
-                var productMatch = !string.IsNullOrWhiteSpace(productType) &&
-                                   string.Equals(profile.ProductType, productType, StringComparison.Ordinal);
-                if ((ecidMatch || productMatch) && (best is null || profile.UpdatedAt > best.UpdatedAt))
+                if (!string.IsNullOrWhiteSpace(normalizedEcid) &&
+                    string.Equals(profile.Ecid, normalizedEcid, StringComparison.OrdinalIgnoreCase))
                 {
-                    best = profile;
+                    return profile;
+                }
+
+                if (string.IsNullOrWhiteSpace(normalizedEcid) &&
+                    !string.IsNullOrWhiteSpace(productType) &&
+                    string.Equals(profile.ProductType, productType, StringComparison.Ordinal) &&
+                    (productFallback is null || profile.UpdatedAt > productFallback.UpdatedAt))
+                {
+                    productFallback = profile;
                 }
             }
             catch
@@ -143,30 +165,42 @@ public sealed class DarkSwordBootProfileStore
             }
         }
 
-        return best;
+        return productFallback;
     }
 
-    public async Task<BootProfileValidationResult> ValidateAsync(
+    public async Task<DarkSwordBootProfile?> FindByPteAsync(
+        string? ptePath,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ptePath) || !Directory.Exists(RootDirectory)) return null;
+        var fullPath = Path.GetFullPath(ptePath);
+        foreach (var path in Directory.EnumerateFiles(RootDirectory, "*.json"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var profile = await LoadAsync(path, cancellationToken).ConfigureAwait(false);
+                if (profile is not null &&
+                    string.Equals(Path.GetFullPath(profile.PtePath), fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return profile;
+                }
+            }
+            catch
+            {
+                // Continue scanning other profiles.
+            }
+        }
+        return null;
+    }
+
+    public async Task<BootProfileValidationResult> ValidateAssetsAsync(
         DarkSwordBootProfile profile,
-        string? connectedProductType,
-        string? connectedEcid,
         string sepRacerPath,
         string kpfPath,
         CancellationToken cancellationToken = default)
     {
-        var errors = new List<string>();
-        if (profile.SchemaVersion != CurrentSchemaVersion)
-            errors.Add($"Unsupported boot profile schema {profile.SchemaVersion}; expected {CurrentSchemaVersion}.");
-        if (!string.IsNullOrWhiteSpace(connectedProductType) &&
-            !string.Equals(profile.ProductType, connectedProductType, StringComparison.Ordinal))
-            errors.Add($"Profile targets {profile.ProductType}, but the connected device is {connectedProductType}.");
-
-        var normalizedEcid = NormalizeEcid(connectedEcid);
-        if (!string.IsNullOrWhiteSpace(normalizedEcid) &&
-            !string.IsNullOrWhiteSpace(profile.Ecid) &&
-            !string.Equals(profile.Ecid, normalizedEcid, StringComparison.OrdinalIgnoreCase))
-            errors.Add("The connected ECID does not match this cold-boot profile.");
-
+        var errors = ValidateProfileShape(profile);
         await ValidateHashAsync(profile.PtePath, profile.PteSha256, "PTE", errors, cancellationToken).ConfigureAwait(false);
         await ValidateHashAsync(sepRacerPath, profile.SepRacerSha256, "sep_racer", errors, cancellationToken).ConfigureAwait(false);
         await ValidateHashAsync(kpfPath, profile.KpfSha256, "kpf", errors, cancellationToken).ConfigureAwait(false);
@@ -192,79 +226,80 @@ public sealed class DarkSwordBootProfileStore
         return new BootProfileValidationResult(errors.Count == 0, errors.Count == 0 ? profile : null, errors);
     }
 
-    public async Task<BootProfileValidationResult> ValidatePteImportAsync(
-        string ptePath,
+    public async Task<BootProfileValidationResult> ValidateAsync(
+        DarkSwordBootProfile profile,
         string? connectedProductType,
         string? connectedEcid,
         string sepRacerPath,
         string kpfPath,
         CancellationToken cancellationToken = default)
     {
-        var fullPath = Path.GetFullPath(ptePath);
-        var metadataPath = fullPath + ".metadata.json";
-        if (!File.Exists(metadataPath))
-        {
-            return new BootProfileValidationResult(
-                false,
-                null,
-                ["The selected PTE has no DarkSword .metadata.json file and cannot be trusted for cold boot."]);
-        }
-
-        RestoreArtifactMetadata? metadata;
-        try
-        {
-            await using var stream = File.OpenRead(metadataPath);
-            metadata = await JsonSerializer.DeserializeAsync<RestoreArtifactMetadata>(
-                stream,
-                JsonOptions,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            return new BootProfileValidationResult(false, null, [$"PTE metadata could not be read: {exception.Message}"]);
-        }
-
-        if (metadata is null || !metadata.ArtifactType.Contains("pte", StringComparison.OrdinalIgnoreCase))
-            return new BootProfileValidationResult(false, null, ["The selected file is not a validated PTE artifact."]);
-        if (!string.IsNullOrWhiteSpace(connectedProductType) &&
-            !string.IsNullOrWhiteSpace(metadata.ProductVersion) &&
-            string.IsNullOrWhiteSpace(metadata.BuildVersion))
-            return new BootProfileValidationResult(false, null, ["The PTE metadata is incomplete."]);
-
-        var pteHash = await HashFileAsync(fullPath, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(pteHash, metadata.Sha256, StringComparison.OrdinalIgnoreCase))
-            return new BootProfileValidationResult(false, null, ["The PTE file hash no longer matches its metadata."]);
-
-        var now = DateTimeOffset.UtcNow;
-        var profile = new DarkSwordBootProfile(
-            CurrentSchemaVersion,
-            BuildKey(connectedProductType ?? "unknown", connectedEcid),
-            connectedProductType ?? "unknown",
-            NormalizeEcid(connectedEcid),
-            metadata.ProductVersion ?? "unknown",
-            metadata.BuildVersion ?? "unknown",
-            metadata.SessionId,
-            Path.GetDirectoryName(fullPath) ?? string.Empty,
-            fullPath,
-            pteHash,
-            await HashFileAsync(sepRacerPath, cancellationToken).ConfigureAwait(false),
-            await HashFileAsync(kpfPath, cancellationToken).ConfigureAwait(false),
-            now,
-            now);
-
-        return await ValidateAsync(
+        var assetResult = await ValidateAssetsAsync(
             profile,
-            connectedProductType,
-            connectedEcid,
             sepRacerPath,
             kpfPath,
             cancellationToken).ConfigureAwait(false);
+        var errors = assetResult.Errors.ToList();
+
+        if (string.IsNullOrWhiteSpace(connectedProductType))
+        {
+            errors.Add("ProductType could not be read from the connected DFU device.");
+        }
+        else if (!string.Equals(profile.ProductType, connectedProductType, StringComparison.Ordinal))
+        {
+            errors.Add($"Profile targets {profile.ProductType}, but the connected device is {connectedProductType}.");
+        }
+
+        var normalizedEcid = NormalizeEcid(connectedEcid);
+        if (string.IsNullOrWhiteSpace(profile.Ecid))
+        {
+            errors.Add("The saved cold-boot profile is not bound to an ECID.");
+        }
+        else if (string.IsNullOrWhiteSpace(normalizedEcid))
+        {
+            errors.Add("ECID could not be read from the connected DFU device.");
+        }
+        else if (!string.Equals(profile.Ecid, normalizedEcid, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"Profile ECID {profile.Ecid} does not match connected ECID {normalizedEcid}.");
+        }
+
+        return new BootProfileValidationResult(errors.Count == 0, errors.Count == 0 ? profile : null, errors);
     }
+
+    public Task<BootProfileValidationResult> ValidatePteImportAsync(
+        string ptePath,
+        string? connectedProductType,
+        string? connectedEcid,
+        string sepRacerPath,
+        string kpfPath,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new BootProfileValidationResult(
+            false,
+            null,
+            [
+                "Raw PTE import is disabled. Import the boot-profile.json created by the completed DarkSword session so ProductType, ECID, session, PTE, SEP, and KPF hashes can all be verified."
+            ]));
 
     public static string BuildKey(string productType, string? ecid) =>
         !string.IsNullOrWhiteSpace(ecid)
             ? $"ecid-{NormalizeEcid(ecid)}"
             : $"product-{productType}";
+
+    private static List<string> ValidateProfileShape(DarkSwordBootProfile profile)
+    {
+        var errors = new List<string>();
+        if (profile.SchemaVersion != CurrentSchemaVersion)
+            errors.Add($"Unsupported boot profile schema {profile.SchemaVersion}; expected {CurrentSchemaVersion}.");
+        if (string.IsNullOrWhiteSpace(profile.ProductType)) errors.Add("Boot profile ProductType is missing.");
+        if (string.IsNullOrWhiteSpace(profile.Ecid)) errors.Add("Boot profile ECID is missing.");
+        if (string.IsNullOrWhiteSpace(profile.SessionId)) errors.Add("Boot profile restore session is missing.");
+        if (string.IsNullOrWhiteSpace(profile.SessionDirectory)) errors.Add("Boot profile session directory is missing.");
+        if (!profile.TargetVersion.StartsWith("15.", StringComparison.Ordinal))
+            errors.Add($"Boot profile target {profile.TargetVersion} is not an iOS/iPadOS 15 downgrade.");
+        if (string.IsNullOrWhiteSpace(profile.IpswSha256)) errors.Add("Boot profile IPSW SHA-256 is missing.");
+        return errors;
+    }
 
     private static async Task ValidateArtifactMetadataAsync(
         string ptePath,
@@ -323,6 +358,20 @@ public sealed class DarkSwordBootProfileStore
         await using var stream = File.OpenRead(path);
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false))
             .ToLowerInvariant();
+    }
+
+    private static async Task WriteProfileAsync(
+        string path,
+        DarkSwordBootProfile profile,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? throw new InvalidOperationException("Boot profile path has no directory."));
+        var temporary = path + ".tmp";
+        await File.WriteAllTextAsync(
+            temporary,
+            JsonSerializer.Serialize(profile, JsonOptions),
+            cancellationToken).ConfigureAwait(false);
+        File.Move(temporary, path, overwrite: true);
     }
 
     private static string? NormalizeEcid(string? ecid) =>
