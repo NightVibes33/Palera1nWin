@@ -158,7 +158,10 @@ public sealed class PackageIntegrityVerifier
 
     private static string? ParseDetachedHash(string text)
     {
-        var token = text.Split(' ', '\t', '\r', '\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        var token = text.Split(
+                [' ', '\t', '\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
         return IsSha256(token) ? token!.ToLowerInvariant() : null;
     }
 
