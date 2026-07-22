@@ -16,6 +16,7 @@ public partial class DowngradeView
         _experienceHooksWired = true;
         InitializeDowngradeExperience();
         InitializeOperationalExperience();
+        InitializeSafeExportOverrides();
         InitializeBootProfiles();
         WireOperationalDeferredHooks();
 
@@ -64,6 +65,7 @@ public partial class DowngradeView
     private async void Experience_Loaded(object sender, RoutedEventArgs e)
     {
         InitializeOperationalExperience();
+        InitializeSafeExportOverrides();
         InitializeBootProfiles();
         WireOperationalDeferredHooks();
         try
