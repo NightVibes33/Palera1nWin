@@ -8,7 +8,7 @@ using Palera1nWin.Core.Usb;
 
 namespace Palera1nWin.App.ViewModels;
 
-public sealed class JailbreakViewModel : ObservableObject
+public sealed class JailbreakViewModel : ObservableObject, IDisposable
 {
     private readonly AppSettings _settings;
     private readonly AppleUsbMonitor _monitor;
@@ -17,6 +17,7 @@ public sealed class JailbreakViewModel : ObservableObject
     private readonly Action<string> _setStatus;
     private CancellationTokenSource? _runCts;
     private bool _isRunning;
+    private bool _disposed;
     private double _progress;
     private string _progressText = "Ready to start.";
     private string _progressHint = string.Empty;
@@ -38,27 +39,24 @@ public sealed class JailbreakViewModel : ObservableObject
         _logService = logService;
         _hardwareOperations = hardwareOperations;
         _setStatus = setStatus;
-
         _selectedJailbreakMode = settings.JailbreakMode;
 
         SafeMode = settings.SafeMode;
         VerboseBoot = settings.VerboseBoot;
         AutoInstallDrivers = settings.AutoInstallDrivers;
 
-        StartJailbreakCommand = new AsyncRelayCommand(StartJailbreakAsync, () => !IsRunning);
+        StartJailbreakCommand = new AsyncRelayCommand(StartJailbreakAsync, () => CanStartJailbreak);
         CancelJailbreakCommand = new RelayCommand(CancelJailbreak, () => IsRunning);
 
         _monitor.DeviceChanged += OnDeviceChanged;
         _hardwareOperations.StateChanged += OnHardwareOperationChanged;
+        _logService.LineAdded += OnLogLineAdded;
         UpdateDeviceBadge(_monitor.CurrentDevice);
         RefreshLogPreview();
-        _logService.LineAdded += (_, _) => RefreshLogPreview();
     }
 
     public AsyncRelayCommand StartJailbreakCommand { get; }
-
     public RelayCommand CancelJailbreakCommand { get; }
-
     public IReadOnlyList<string> JailbreakModes { get; } = ["rootless", "rootful"];
 
     public string SelectedJailbreakMode
@@ -183,6 +181,7 @@ public sealed class JailbreakViewModel : ObservableObject
 
     private async Task StartJailbreakAsync()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         _settings.Clamp();
         _settings.Save();
 
@@ -195,11 +194,11 @@ public sealed class JailbreakViewModel : ObservableObject
                 "Validating jailbreak toolchain and USB state",
                 _runCts.Token).ConfigureAwait(true);
         }
-        catch (HardwareOperationBusyException ex)
+        catch (HardwareOperationBusyException exception)
         {
-            _logService.Append("jailbreak", ex.Message, isError: true);
-            ProgressText = ex.Message;
-            _setStatus(ex.Message);
+            _logService.Append("jailbreak", exception.Message, isError: true);
+            ProgressText = exception.Message;
+            _setStatus(exception.Message);
             _runCts.Dispose();
             _runCts = null;
             return;
@@ -213,7 +212,10 @@ public sealed class JailbreakViewModel : ObservableObject
 
         try
         {
-            using var orchestrator = new JailbreakOrchestrator(_settings, new WpfUserPromptService());
+            using var orchestrator = new JailbreakOrchestrator(
+                _settings,
+                new WpfUserPromptService(),
+                _monitor);
             orchestrator.LogReceived += OnOrchestratorLog;
             orchestrator.ProgressChanged += OnOrchestratorProgress;
 
@@ -243,10 +245,10 @@ public sealed class JailbreakViewModel : ObservableObject
             ProgressText = "Jailbreak cancelled.";
             _setStatus("Jailbreak cancelled.");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logService.Append("jailbreak", ex.Message, isError: true);
-            ProgressText = $"Jailbreak error: {ex.Message}";
+            _logService.Append("jailbreak", exception.Message, isError: true);
+            ProgressText = $"Jailbreak error: {exception.Message}";
             _setStatus("Jailbreak error.");
         }
         finally
@@ -270,10 +272,8 @@ public sealed class JailbreakViewModel : ObservableObject
         ProgressText = "Cancelling...";
     }
 
-    private void OnOrchestratorLog(object? sender, LogLine line)
-    {
+    private void OnOrchestratorLog(object? sender, LogLine line) =>
         System.Windows.Application.Current?.Dispatcher.Invoke(() => _logService.Append(line));
-    }
 
     private void OnOrchestratorProgress(object? sender, ProgressEventArgs e)
     {
@@ -288,10 +288,8 @@ public sealed class JailbreakViewModel : ObservableObject
         });
     }
 
-    private void OnDeviceChanged(object? sender, AppleUsbDevice device)
-    {
+    private void OnDeviceChanged(object? sender, AppleUsbDevice device) =>
         System.Windows.Application.Current?.Dispatcher.Invoke(() => UpdateDeviceBadge(device));
-    }
 
     private void OnHardwareOperationChanged(object? sender, HardwareOperationState state)
     {
@@ -301,6 +299,8 @@ public sealed class JailbreakViewModel : ObservableObject
             StartJailbreakCommand.RaiseCanExecuteChanged();
         });
     }
+
+    private void OnLogLineAdded(object? sender, LogLine line) => RefreshLogPreview();
 
     private void UpdateDeviceBadge(AppleUsbDevice device)
     {
@@ -315,5 +315,17 @@ public sealed class JailbreakViewModel : ObservableObject
         LogPreview = recent.Count == 0
             ? "Log output will appear here during jailbreak."
             : string.Join(Environment.NewLine, recent);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _runCts?.Cancel();
+        _runCts?.Dispose();
+        _runCts = null;
+        _monitor.DeviceChanged -= OnDeviceChanged;
+        _hardwareOperations.StateChanged -= OnHardwareOperationChanged;
+        _logService.LineAdded -= OnLogLineAdded;
     }
 }
