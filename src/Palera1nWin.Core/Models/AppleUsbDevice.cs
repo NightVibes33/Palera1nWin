@@ -9,27 +9,19 @@ public sealed class AppleUsbDevice
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public string DeviceId { get; init; } = string.Empty;
-
     public string Name { get; init; } = string.Empty;
-
     public string Status { get; init; } = string.Empty;
-
     public string Service { get; init; } = string.Empty;
-
     public string? BusId { get; init; }
-
     public ushort VendorId { get; init; }
-
     public ushort ProductId { get; init; }
-
     public DeviceMode Mode { get; init; }
 
     public bool IsPresent =>
         !string.IsNullOrWhiteSpace(DeviceId) &&
-        !string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase) &&
-        // Pongo often enumerates as Status=Error until libusbK/WinUSB binds — still real hardware.
-        (ProductId == 0x4141 ||
-         !string.Equals(Status, "Error", StringComparison.OrdinalIgnoreCase));
+        (IsKnownAppleModePid(ProductId) ||
+         (!string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase) &&
+          !string.Equals(Status, "Error", StringComparison.OrdinalIgnoreCase)));
 
     public static AppleUsbDevice Empty { get; } = new();
 
@@ -51,8 +43,6 @@ public sealed class AppleUsbDevice
             pid = Convert.ToUInt16(match.Groups[2].Value, 16);
         }
 
-        var mode = MapMode(normalizedId, pid, status);
-
         return new AppleUsbDevice
         {
             DeviceId = normalizedId,
@@ -62,7 +52,7 @@ public sealed class AppleUsbDevice
             BusId = busId,
             VendorId = vid,
             ProductId = pid,
-            Mode = mode,
+            Mode = MapMode(normalizedId, pid, status),
         };
     }
 
@@ -70,41 +60,37 @@ public sealed class AppleUsbDevice
     {
         var upperId = deviceId.ToUpperInvariant();
 
-        // Identify Pongo / YOLO / PWND before treating non-OK status as Busy.
+        // Hardware identity wins over a transient Windows PnP problem code. Apple
+        // devices commonly report Error/Unknown while drivers are re-enumerating.
         if (productId == 0x4141 || upperId.Contains("PID_4141", StringComparison.Ordinal))
-        {
             return DeviceMode.Pongo;
-        }
-
         if (upperId.Contains("YOLO:", StringComparison.Ordinal))
-        {
             return DeviceMode.YoloDfu;
-        }
-
         if (upperId.Contains("PWND", StringComparison.Ordinal))
-        {
             return DeviceMode.PwnedDfu;
-        }
+
+        var knownMode = productId switch
+        {
+            0x12A0 or 0x12A8 or 0x12AA or 0x12AB => DeviceMode.Normal,
+            0x1280 or 0x1281 or 0x1282 or 0x1283 => DeviceMode.Recovery,
+            0x1222 or 0x1227 => DeviceMode.Dfu,
+            _ => DeviceMode.None,
+        };
+        if (knownMode != DeviceMode.None) return knownMode;
 
         if (!string.IsNullOrWhiteSpace(status) &&
             !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(status, "Present", StringComparison.OrdinalIgnoreCase))
-        {
             return DeviceMode.Busy;
-        }
 
-        return productId switch
-        {
-            0x12A8 or 0x12AB or 0x12A0 => DeviceMode.Normal,
-            0x1280 or 0x1281 or 0x1282 or 0x1283 => DeviceMode.Recovery,
-            0x1227 or 0x1222 => DeviceMode.Dfu,
-            0x4141 => DeviceMode.Pongo,
-            _ => DeviceMode.None,
-        };
+        return DeviceMode.None;
     }
 
-    public override string ToString()
-    {
-        return $"{Mode} VID_{VendorId:X4}:PID_{ProductId:X4} ({Name})";
-    }
+    internal static bool IsKnownAppleModePid(ushort productId) => productId is
+        0x12A0 or 0x12A8 or 0x12AA or 0x12AB or
+        0x1280 or 0x1281 or 0x1282 or 0x1283 or
+        0x1222 or 0x1227 or 0x4141;
+
+    public override string ToString() =>
+        $"{Mode} VID_{VendorId:X4}:PID_{ProductId:X4} ({Name})";
 }
