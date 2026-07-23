@@ -1,0 +1,1 @@
+Onboarding v2 uses high-contrast dark surfaces and matches the four-action downgrade workflow.
