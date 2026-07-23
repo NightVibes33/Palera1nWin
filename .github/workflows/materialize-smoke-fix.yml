@@ -1,0 +1,27 @@
+name: Materialize smoke fix
+
+on:
+  push:
+    branches:
+      - fix-downgrade-pwned-dfu-stage
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: fix-downgrade-pwned-dfu-stage
+          fetch-depth: 0
+      - run: python3 DarkSwordRestore/scripts/materialize-smoke-fix.py
+      - shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add DarkSwordRestore/scripts/smoke-test-package.ps1
+          git commit -m "Fix managed constant smoke assertion"
+          git push origin HEAD:fix-downgrade-pwned-dfu-stage
