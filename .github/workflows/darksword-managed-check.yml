@@ -91,3 +91,71 @@ jobs:
           path: DarkSwordRestore/build/managed-check.log
           if-no-files-found: error
           retention-days: 14
+
+  virtual-device-smoke:
+    name: Virtual iPad6,11 jailbreak and downgrade smoke
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up .NET 10 and .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: |
+            10.0.x
+            8.0.x
+
+      - name: Restore virtual device harness
+        shell: pwsh
+        run: |
+          dotnet restore DarkSwordRestore/tools/DarkSwordRestore.VirtualDeviceSmoke/DarkSwordRestore.VirtualDeviceSmoke.csproj `
+            -r win-x64
+
+      - name: Build virtual tools and run end-to-end smoke
+        id: virtual
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publish = 'DarkSwordRestore/build/virtual-device-smoke'
+          $work = 'DarkSwordRestore/build/virtual-device-work'
+          $report = 'DarkSwordRestore/build/virtual-device-smoke-report.json'
+          $transcript = 'DarkSwordRestore/build/virtual-device-smoke-transcript.txt'
+          New-Item -ItemType Directory -Force DarkSwordRestore/build | Out-Null
+
+          dotnet publish DarkSwordRestore/tools/DarkSwordRestore.VirtualDeviceSmoke/DarkSwordRestore.VirtualDeviceSmoke.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            --no-restore `
+            -warnaserror `
+            -o $publish
+
+          & (Join-Path $publish 'DarkSwordRestore.VirtualDeviceSmoke.exe') `
+            --work-root $work `
+            --report $report `
+            --transcript $transcript
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $result = Get-Content $report -Raw | ConvertFrom-Json
+          "## Virtual iPad6,11 smoke" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Passed: $($result.passed)  " | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Failed: $($result.failed)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          foreach ($scenario in $result.scenarios) {
+            $mark = if ($scenario.passed) { '✅' } else { '❌' }
+            "- $mark $($scenario.name)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload virtual device evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: DarkSword-virtual-iPad6-11-smoke-${{ github.run_number }}
+          path: |
+            DarkSwordRestore/build/virtual-device-smoke-report.json
+            DarkSwordRestore/build/virtual-device-smoke-transcript.txt
+            DarkSwordRestore/build/virtual-device-work/**/virtual-device.json
+          if-no-files-found: error
+          retention-days: 30
