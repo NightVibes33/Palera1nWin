@@ -45,6 +45,22 @@ public sealed record AppleDeviceSnapshot(
 {
     public static AppleDeviceSnapshot Disconnected { get; } =
         new(AppleDeviceMode.Disconnected, null, null, null, null, null, null, DateTimeOffset.UtcNow);
+
+    [JsonIgnore]
+    public bool HasExactIdentity => !string.IsNullOrWhiteSpace(ProductType) && !string.IsNullOrWhiteSpace(Ecid);
+
+    public string? NormalizedEcid => NormalizeEcid(Ecid);
+
+    public bool MatchesIdentity(string? productType, string? ecid) =>
+        !string.IsNullOrWhiteSpace(productType) &&
+        !string.IsNullOrWhiteSpace(ecid) &&
+        string.Equals(ProductType, productType, StringComparison.Ordinal) &&
+        string.Equals(NormalizedEcid, NormalizeEcid(ecid), StringComparison.OrdinalIgnoreCase);
+
+    public static string? NormalizeEcid(string? ecid) =>
+        string.IsNullOrWhiteSpace(ecid)
+            ? null
+            : ecid.Trim().Replace("0x", string.Empty, StringComparison.OrdinalIgnoreCase).ToUpperInvariant();
 }
 
 public sealed record IpswInspectionResult(
@@ -66,8 +82,6 @@ public sealed record IpswInspectionResult(
         .Select(DarkSwordDeviceCatalog.Find)
         .Any(device => device?.UsesA9SepBlocks == true);
 
-    // Retained for the existing orchestrator API. It now means the active
-    // Windows A9/A9X SHC/PTE restore path rather than only iPad 5.
     [JsonIgnore]
     public bool SupportsIpad5 => SupportsWindowsA9Restore;
 
@@ -92,6 +106,9 @@ public sealed record ToolResult(
     TimeSpan Duration)
 {
     public bool Success => ExitCode == 0;
+    public string CombinedOutput => string.IsNullOrWhiteSpace(StandardError)
+        ? StandardOutput
+        : StandardOutput + Environment.NewLine + StandardError;
 }
 
 public sealed record RestoreSession(
@@ -103,7 +120,17 @@ public sealed record RestoreSession(
     string? PteBlockPath,
     RestoreStage LastStage,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? BoundProductType = null,
+    string? BoundEcid = null)
+{
+    [JsonIgnore]
+    public bool HasBoundIdentity =>
+        !string.IsNullOrWhiteSpace(BoundProductType) && !string.IsNullOrWhiteSpace(BoundEcid);
+
+    public bool MatchesBoundIdentity(AppleDeviceSnapshot snapshot) =>
+        snapshot.MatchesIdentity(BoundProductType, BoundEcid);
+}
 
 public sealed class DarkSwordException : Exception
 {

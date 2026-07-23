@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DarkSwordRestore.Core;
 
@@ -13,8 +14,7 @@ public sealed record ToolchainPaths(
 {
     public static ToolchainPaths FromApplicationDirectory(string? applicationDirectory = null)
     {
-        var baseDirectory = applicationDirectory ?? AppContext.BaseDirectory;
-        var root = Path.Combine(baseDirectory, "toolchain");
+        var root = Path.Combine(applicationDirectory ?? AppContext.BaseDirectory, "toolchain");
         return new ToolchainPaths(
             root,
             Path.Combine(root, "openra1n.exe"),
@@ -26,24 +26,46 @@ public sealed record ToolchainPaths(
     public IReadOnlyList<string> MissingFiles() =>
         new[]
         {
-            OpenRa1n,
-            IdeviceRestore,
-            PongoBridge,
-            WdiSimple,
+            OpenRa1n, IdeviceRestore, PongoBridge, WdiSimple,
             Path.Combine(Root, "ideviceinfo.exe"),
-            Path.Combine(Root, "irecovery.exe")
+            Path.Combine(Root, "irecovery.exe"),
+        }.Where(path => !File.Exists(path)).ToArray();
+}
+
+internal sealed class BoundedLineBuffer
+{
+    private readonly int _capacity;
+    private readonly Queue<string> _lines = new();
+    private readonly object _gate = new();
+
+    public BoundedLineBuffer(int capacity = 10_000) => _capacity = Math.Max(100, capacity);
+
+    public void Add(string line)
+    {
+        lock (_gate)
+        {
+            _lines.Enqueue(line);
+            while (_lines.Count > _capacity) _lines.Dequeue();
         }
-        .Where(path => !File.Exists(path))
-        .ToArray();
+    }
+
+    public override string ToString()
+    {
+        lock (_gate) return string.Join(Environment.NewLine, _lines);
+    }
 }
 
 public sealed class ToolProcessSession : IAsyncDisposable
 {
     private readonly Process _process;
-    private readonly List<string> _stdout = [];
-    private readonly List<string> _stderr = [];
+    private readonly BoundedLineBuffer _stdout = new();
+    private readonly BoundedLineBuffer _stderr = new();
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+    private readonly CancellationTokenSource _lifetime;
     private readonly CancellationTokenRegistration _cancellationRegistration;
+    private readonly TaskCompletionSource _stdoutClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _stderrClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TimeSpan _timeout;
     private int _disposed;
 
     internal ToolProcessSession(
@@ -51,86 +73,109 @@ public sealed class ToolProcessSession : IAsyncDisposable
         IEnumerable<string> arguments,
         string? workingDirectory,
         Action<string>? onOutput,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan timeout)
     {
-        var startInfo = new ProcessStartInfo
+        var startInfo = CreateStartInfo(fileName, arguments, workingDirectory);
+        FileName = fileName;
+        Arguments = string.Join(' ', startInfo.ArgumentList.Select(QuoteForLog));
+        _timeout = timeout;
+        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _lifetime.CancelAfter(timeout);
+        _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is null) { _stdoutClosed.TrySetResult(); return; }
+            _stdout.Add(args.Data);
+            InvokeOutput(onOutput, args.Data);
+        };
+        _process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is null) { _stderrClosed.TrySetResult(); return; }
+            _stderr.Add(args.Data);
+            InvokeOutput(onOutput, args.Data);
+        };
+
+        if (!_process.Start()) throw new InvalidOperationException($"Unable to start {fileName}.");
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+        _cancellationRegistration = _lifetime.Token.Register(Kill);
+        Completion = CompleteAsync(cancellationToken);
+    }
+
+    public string FileName { get; }
+    public string Arguments { get; }
+    public Task<ToolResult> Completion { get; }
+    public bool HasExited { get { try { return _process.HasExited; } catch { return true; } } }
+
+    public void Kill()
+    {
+        try { if (!_process.HasExited) _process.Kill(entireProcessTree: true); }
+        catch { }
+    }
+
+    private async Task<ToolResult> CompleteAsync(CancellationToken callerToken)
+    {
+        try
+        {
+            await _process.WaitForExitAsync(_lifetime.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            Kill();
+            try { await _process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
+            throw new TimeoutException(
+                $"{Path.GetFileName(FileName)} exceeded its hard timeout of {_timeout}. Its process tree was terminated and the restore session was preserved.");
+        }
+        finally
+        {
+            if (_lifetime.IsCancellationRequested) Kill();
+        }
+
+        await WaitForOutputCloseAsync().ConfigureAwait(false);
+        _stopwatch.Stop();
+        return new ToolResult(FileName, Arguments, _process.ExitCode, _stdout.ToString(), _stderr.ToString(), _stopwatch.Elapsed);
+    }
+
+    private async Task WaitForOutputCloseAsync()
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(_stdoutClosed.Task, _stderrClosed.Task).WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _lifetime.Cancel();
+        Kill();
+        try { await Completion.ConfigureAwait(false); } catch { }
+        _cancellationRegistration.Dispose();
+        _lifetime.Dispose();
+        _process.Dispose();
+    }
+
+    private static ProcessStartInfo CreateStartInfo(string fileName, IEnumerable<string> arguments, string? workingDirectory)
+    {
+        var start = new ProcessStartInfo
         {
             FileName = fileName,
             WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(fileName) ?? AppContext.BaseDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
         };
-        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
-
-        FileName = fileName;
-        Arguments = string.Join(' ', startInfo.ArgumentList.Select(QuoteForLog));
-        _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        _process.OutputDataReceived += (_, args) =>
-        {
-            if (args.Data is null) return;
-            lock (_stdout) _stdout.Add(args.Data);
-            onOutput?.Invoke(args.Data);
-        };
-        _process.ErrorDataReceived += (_, args) =>
-        {
-            if (args.Data is null) return;
-            lock (_stderr) _stderr.Add(args.Data);
-            onOutput?.Invoke(args.Data);
-        };
-
-        if (!_process.Start()) throw new InvalidOperationException($"Unable to start {fileName}.");
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
-        _cancellationRegistration = cancellationToken.Register(Kill);
-        Completion = CompleteAsync();
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        return start;
     }
 
-    public string FileName { get; }
-    public string Arguments { get; }
-    public Task<ToolResult> Completion { get; }
-
-    public bool HasExited
+    private static void InvokeOutput(Action<string>? output, string line)
     {
-        get
-        {
-            try { return _process.HasExited; }
-            catch { return true; }
-        }
-    }
-
-    public void Kill()
-    {
-        try
-        {
-            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-            // Process may exit while cancellation/cleanup is running.
-        }
-    }
-
-    private async Task<ToolResult> CompleteAsync()
-    {
-        await _process.WaitForExitAsync().ConfigureAwait(false);
-        _process.WaitForExit();
-        _stopwatch.Stop();
-        string stdout;
-        string stderr;
-        lock (_stdout) stdout = string.Join(Environment.NewLine, _stdout);
-        lock (_stderr) stderr = string.Join(Environment.NewLine, _stderr);
-        return new ToolResult(FileName, Arguments, _process.ExitCode, stdout, stderr, _stopwatch.Elapsed);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        Kill();
-        try { await Completion.ConfigureAwait(false); } catch { }
-        _cancellationRegistration.Dispose();
-        _process.Dispose();
+        try { output?.Invoke(line); } catch { }
     }
 
     private static string QuoteForLog(string value) => value.Any(char.IsWhiteSpace) ? $"\"{value}\"" : value;
@@ -146,10 +191,17 @@ public sealed class ToolProcessRunner
         IEnumerable<string> arguments,
         string? workingDirectory,
         Action<string>? onOutput,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         if (!File.Exists(fileName)) throw new FileNotFoundException("Required tool was not found.", fileName);
-        return new ToolProcessSession(fileName, arguments, workingDirectory, onOutput, cancellationToken);
+        return new ToolProcessSession(
+            fileName,
+            arguments,
+            workingDirectory,
+            onOutput,
+            cancellationToken,
+            timeout ?? ResolveDefaultTimeout(fileName));
     }
 
     public async Task<ToolResult> RunAsync(
@@ -158,83 +210,20 @@ public sealed class ToolProcessRunner
         string? workingDirectory,
         Action<string>? onOutput,
         CancellationToken cancellationToken,
-        bool requireZeroExitCode = true)
+        bool requireZeroExitCode = true,
+        TimeSpan? timeout = null)
     {
-        if (!File.Exists(fileName))
-        {
-            throw new FileNotFoundException("Required tool was not found.", fileName);
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(fileName) ?? AppContext.BaseDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        var stdout = new List<string>();
-        var stderr = new List<string>();
-        var started = Stopwatch.StartNew();
-
-        process.OutputDataReceived += (_, args) =>
-        {
-            if (args.Data is null) return;
-            lock (stdout) stdout.Add(args.Data);
-            onOutput?.Invoke(args.Data);
-        };
-        process.ErrorDataReceived += (_, args) =>
-        {
-            if (args.Data is null) return;
-            lock (stderr) stderr.Add(args.Data);
-            onOutput?.Invoke(args.Data);
-        };
-
-        if (!process.Start())
-        {
-            throw new InvalidOperationException($"Unable to start {fileName}.");
-        }
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var registration = cancellationToken.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // The process may have exited between the state check and Kill.
-            }
-        });
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        started.Stop();
-        var result = new ToolResult(
+        await using var session = StartSession(
             fileName,
-            string.Join(' ', startInfo.ArgumentList.Select(QuoteForLog)),
-            process.ExitCode,
-            string.Join(Environment.NewLine, stdout),
-            string.Join(Environment.NewLine, stderr),
-            started.Elapsed);
-
+            arguments,
+            workingDirectory,
+            onOutput,
+            cancellationToken,
+            timeout ?? ResolveDefaultTimeout(fileName));
+        var result = await session.Completion.ConfigureAwait(false);
         if (requireZeroExitCode && !result.Success)
-        {
             throw new InvalidOperationException(
                 $"{Path.GetFileName(fileName)} exited with code {result.ExitCode}.{Environment.NewLine}{result.StandardError}");
-        }
-
         return result;
     }
 
@@ -242,31 +231,28 @@ public sealed class ToolProcessRunner
         string fileName,
         IEnumerable<string> arguments,
         string? workingDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
             throw new PlatformNotSupportedException("Driver operations are Windows-only.");
-        }
-        if (!File.Exists(fileName))
-        {
-            throw new FileNotFoundException("The elevated tool was not found.", fileName);
-        }
+        if (!File.Exists(fileName)) throw new FileNotFoundException("The elevated tool was not found.", fileName);
 
-        var argumentText = string.Join(' ', arguments.Select(QuoteForCommandLine));
-        var startInfo = new ProcessStartInfo
+        var start = new ProcessStartInfo
         {
             FileName = fileName,
-            Arguments = argumentText,
+            Arguments = BuildWindowsCommandLine(arguments),
             WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(fileName) ?? AppContext.BaseDirectory,
             UseShellExecute = true,
-            Verb = "runas"
+            Verb = "runas",
         };
-
-        return RunElevatedCoreAsync(startInfo, cancellationToken);
+        return RunElevatedCoreAsync(start, cancellationToken, timeout ?? TimeSpan.FromMinutes(3));
     }
 
-    private static async Task<ToolResult> RunElevatedCoreAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
+    private static async Task<ToolResult> RunElevatedCoreAsync(
+        ProcessStartInfo startInfo,
+        CancellationToken cancellationToken,
+        TimeSpan timeout)
     {
         var stopwatch = Stopwatch.StartNew();
         Process process;
@@ -277,48 +263,79 @@ public sealed class ToolProcessRunner
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
         {
             throw new InvalidOperationException(
-                $"Windows administrator approval was cancelled. DarkSword did not install the required Apple USB driver. " +
-                $"Run Palera1nWin as administrator, retry, and choose Yes for {Path.GetFileName(startInfo.FileName)}.",
-                exception);
+                $"Windows administrator approval was cancelled for {Path.GetFileName(startInfo.FileName)}.", exception);
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorAccessDenied)
         {
             throw new InvalidOperationException(
-                $"Windows blocked administrator access for {Path.GetFileName(startInfo.FileName)}. " +
-                "Run Palera1nWin as administrator and allow the driver installer through Windows Security if it was blocked.",
-                exception);
+                $"Windows blocked administrator access for {Path.GetFileName(startInfo.FileName)}.", exception);
         }
 
         using (process)
-        using (var registration = cancellationToken.Register(() =>
+        using (var timeoutCts = new CancellationTokenSource(timeout))
+        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
+        using (var registration = linked.Token.Register(() =>
                {
-                   try
-                   {
-                       if (!process.HasExited) process.Kill(entireProcessTree: true);
-                   }
-                   catch
-                   {
-                       // Best-effort cancellation of an elevated child process.
-                   }
+                   try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
                }))
         {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            stopwatch.Stop();
-            var result = new ToolResult(startInfo.FileName, startInfo.Arguments, process.ExitCode, string.Empty, string.Empty, stopwatch.Elapsed);
-            if (!result.Success)
+            try
             {
-                throw new InvalidOperationException(
-                    $"{Path.GetFileName(startInfo.FileName)} could not install the required Apple USB driver and exited with code {result.ExitCode}. " +
-                    "Reconnect the device in the requested mode, run Palera1nWin as administrator, and retry.");
+                await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"{Path.GetFileName(startInfo.FileName)} timed out after {timeout}.");
+            }
+            stopwatch.Stop();
+            var result = new ToolResult(startInfo.FileName, startInfo.Arguments, process.ExitCode, "", "", stopwatch.Elapsed);
+            if (!result.Success)
+                throw new InvalidOperationException(
+                    $"{Path.GetFileName(startInfo.FileName)} exited with code {result.ExitCode}; the USB driver was not changed.");
             return result;
         }
     }
 
-    private static string QuoteForLog(string value) => value.Any(char.IsWhiteSpace) ? $"\"{value}\"" : value;
+    internal static TimeSpan ResolveDefaultTimeout(string fileName)
+    {
+        var name = Path.GetFileName(fileName);
+        if (name.Contains("turdus", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("idevicerestore", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromHours(2);
+        if (name.Contains("openra1n", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(3);
+        if (name.Contains("pongo", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(5);
+        if (name.Contains("wdi", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromMinutes(3);
+        if (name.Contains("irecovery", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("ideviceinfo", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            return TimeSpan.FromSeconds(30);
+        return TimeSpan.FromMinutes(20);
+    }
 
-    private static string QuoteForCommandLine(string value) =>
-        value.Length == 0 || value.Any(char.IsWhiteSpace) || value.Contains('"')
-            ? $"\"{value.Replace("\"", "\\\"")}\""
-            : value;
+    internal static string BuildWindowsCommandLine(IEnumerable<string> arguments) =>
+        string.Join(' ', arguments.Select(QuoteWindowsArgument));
+
+    private static string QuoteWindowsArgument(string value)
+    {
+        if (value.Length > 0 && !value.Any(character => char.IsWhiteSpace(character) || character == '"')) return value;
+        var builder = new StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var character in value)
+        {
+            if (character == '\\') { backslashes++; continue; }
+            if (character == '"')
+            {
+                builder.Append('\\', backslashes * 2 + 1).Append('"');
+                backslashes = 0;
+                continue;
+            }
+            builder.Append('\\', backslashes).Append(character);
+            backslashes = 0;
+        }
+        builder.Append('\\', backslashes * 2).Append('"');
+        return builder.ToString();
+    }
 }

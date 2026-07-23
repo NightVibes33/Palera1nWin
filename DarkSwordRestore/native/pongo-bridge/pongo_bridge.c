@@ -34,7 +34,11 @@ static unsigned char *read_file(const char *path, size_t *length) {
         fprintf(stderr, "[error] unable to open %s\n", path);
         exit(3);
     }
-    if (fseek(file, 0, SEEK_END) != 0) exit(3);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        fprintf(stderr, "[error] unable to seek resource: %s\n", path);
+        exit(3);
+    }
     long size = ftell(file);
     if (size <= 0 || fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
@@ -69,6 +73,10 @@ static int control_in(libusb_device_handle *device, uint8_t request, unsigned ch
 static void pongo_clear(libusb_device_handle *device) {
     int result = control_out(device, PONGO_CMD_CLEAR, 0xFFFF, NULL, 0);
     if (result < 0) die_libusb("Pongo clear", result);
+    if (result != 0) {
+        fprintf(stderr, "[error] unexpected Pongo clear response length: %d\n", result);
+        exit(4);
+    }
 }
 
 static void pongo_wait_done(libusb_device_handle *device, unsigned timeout_ms) {
@@ -76,8 +84,16 @@ static void pongo_wait_done(libusb_device_handle *device, unsigned timeout_ms) {
     while (elapsed < timeout_ms) {
         unsigned char in_progress = 1;
         int result = control_in(device, PONGO_CMD_STATUS, &in_progress, 1);
-        if (result == 1 && in_progress == 0) return;
-        if (result < 0 && result != LIBUSB_ERROR_PIPE && result != LIBUSB_ERROR_TIMEOUT) {
+        if (result == 1) {
+            if (in_progress == 0) return;
+            if (in_progress != 1) {
+                fprintf(stderr, "[error] invalid Pongo status byte: %u\n", (unsigned)in_progress);
+                exit(4);
+            }
+        } else if (result >= 0) {
+            fprintf(stderr, "[error] short Pongo status response: %d/1\n", result);
+            exit(4);
+        } else if (result != LIBUSB_ERROR_PIPE && result != LIBUSB_ERROR_TIMEOUT) {
             die_libusb("Pongo status", result);
         }
         sleep_ms(10);
@@ -90,6 +106,10 @@ static void pongo_wait_done(libusb_device_handle *device, unsigned timeout_ms) {
 static void pongo_send_command(libusb_device_handle *device, const char *command) {
     pongo_clear(device);
     size_t length = strlen(command);
+    if (length == 0 || length > UINT16_MAX) {
+        fprintf(stderr, "[error] invalid Pongo command length: %zu\n", length);
+        exit(4);
+    }
     printf("[cmd] %s", command);
     fflush(stdout);
     int result = control_out(device, PONGO_CMD_SEND, 0, (unsigned char *)command, (uint16_t)length);
@@ -131,9 +151,9 @@ static void pongo_send_resource(libusb_device_handle *device, const char *name, 
             free(data);
             die_libusb("Pongo bulk data", result);
         }
-        if (transferred <= 0) {
+        if (transferred <= 0 || transferred > chunk) {
             free(data);
-            fprintf(stderr, "[error] Pongo bulk transfer made no progress\n");
+            fprintf(stderr, "[error] invalid Pongo bulk progress (%d/%d)\n", transferred, chunk);
             exit(4);
         }
         offset += (size_t)transferred;
@@ -147,15 +167,43 @@ static void pongo_send_resource(libusb_device_handle *device, const char *name, 
     free(data);
 }
 
-static libusb_device_handle *open_pongo(libusb_context **context) {
+static libusb_device_handle *open_single_pongo(libusb_context **context) {
     int result = libusb_init_context(context, NULL, 0);
     if (result < 0) die_libusb("libusb initialization", result);
 
-    libusb_device_handle *device = libusb_open_device_with_vid_pid(*context, APPLE_VID, PONGO_PID);
-    if (!device) {
-        fprintf(stderr, "[error] PongoOS device 05AC:4141 was not found\n");
+    libusb_device **list = NULL;
+    ssize_t count = libusb_get_device_list(*context, &list);
+    if (count < 0) {
+        libusb_exit(*context);
+        die_libusb("enumerating USB devices", (int)count);
+    }
+
+    libusb_device *selected = NULL;
+    int matches = 0;
+    for (ssize_t index = 0; index < count; ++index) {
+        struct libusb_device_descriptor descriptor;
+        if (libusb_get_device_descriptor(list[index], &descriptor) != 0) continue;
+        if (descriptor.idVendor == APPLE_VID && descriptor.idProduct == PONGO_PID) {
+            selected = list[index];
+            matches++;
+        }
+    }
+
+    if (matches != 1 || selected == NULL) {
+        fprintf(stderr, matches == 0
+            ? "[error] PongoOS device 05AC:4141 was not found\n"
+            : "[error] multiple PongoOS devices were found; disconnect every non-target Apple device\n");
+        libusb_free_device_list(list, 1);
         libusb_exit(*context);
         exit(2);
+    }
+
+    libusb_device_handle *device = NULL;
+    result = libusb_open(selected, &device);
+    libusb_free_device_list(list, 1);
+    if (result < 0 || !device) {
+        libusb_exit(*context);
+        die_libusb("opening the single Pongo device", result < 0 ? result : LIBUSB_ERROR_OTHER);
     }
 
     libusb_set_auto_detach_kernel_driver(device, 1);
@@ -191,16 +239,17 @@ int main(int argc, char **argv) {
     }
 
     libusb_context *context = NULL;
-    libusb_device_handle *device = open_pongo(&context);
+    libusb_device_handle *device = open_single_pongo(&context);
 
     if (strcmp(argv[1], "probe") == 0) {
-        printf("PongoOS device detected (05AC:4141)\n");
+        printf("Exactly one PongoOS device detected (05AC:4141)\n");
     } else if (strcmp(argv[1], "boot") == 0) {
         const char *pteblock = argument_value(argc, argv, "--pteblock");
         const char *sep_racer = argument_value(argc, argv, "--sep-racer");
         const char *kpf = argument_value(argc, argv, "--kpf");
         if (!pteblock || !sep_racer || !kpf) {
             usage(argv[0]);
+            libusb_release_interface(device, PONGO_INTERFACE);
             libusb_close(device);
             libusb_exit(context);
             return 1;
@@ -217,9 +266,10 @@ int main(int argc, char **argv) {
         pongo_send_command(device, "modload\n");
         pongo_send_command(device, "kpf-tethered\n");
         pongo_send_command(device, "bootux\n");
-        printf("[complete] tether boot commands sent\n");
+        printf("[complete] tether boot commands acknowledged by the Pongo status protocol\n");
     } else {
         usage(argv[0]);
+        libusb_release_interface(device, PONGO_INTERFACE);
         libusb_close(device);
         libusb_exit(context);
         return 1;

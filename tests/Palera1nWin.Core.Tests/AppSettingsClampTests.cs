@@ -39,14 +39,15 @@ public sealed class AppSettingsClampTests
     }
 
     [Fact]
-    public void Directories_ArePortableNextToExe()
+    public void Directories_AreWritableUnderLocalAppData()
     {
-        // Portable mode: settings, logs, and runtime live next to the running executable.
-        Assert.Equal(AppContext.BaseDirectory, AppSettings.RootDirectory);
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        Assert.StartsWith(local, AppSettings.RootDirectory, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("logs", AppSettings.LogsDirectory, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("runtime", AppSettings.RuntimeDirectory, StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith(AppSettings.RootDirectory, AppSettings.LogsDirectory, StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith(AppSettings.RootDirectory, AppSettings.RuntimeDirectory, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("settings.json", AppSettings.SettingsFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(AppContext.BaseDirectory, AppSettings.RootDirectory);
     }
 }

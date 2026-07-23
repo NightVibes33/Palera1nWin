@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 
@@ -6,23 +7,14 @@ namespace Palera1nWin.Core.Util;
 public sealed class ProcessResult
 {
     public int ExitCode { get; init; }
-
     public string StandardOutput { get; init; } = string.Empty;
-
     public string StandardError { get; init; } = string.Empty;
-
-    public string CombinedOutput =>
-        string.IsNullOrWhiteSpace(StandardError)
-            ? StandardOutput
-            : StandardOutput + Environment.NewLine + StandardError;
-
+    public string CombinedOutput => string.IsNullOrWhiteSpace(StandardError)
+        ? StandardOutput
+        : StandardOutput + Environment.NewLine + StandardError;
     public bool Succeeded => ExitCode == 0;
 }
 
-/// <summary>
-/// Called when process output matches an interactive prompt.
-/// Return true to send <paramref name="replyText"/> to stdin (after user confirms in UI).
-/// </summary>
 public delegate Task<bool> ProcessPromptHandler(
     string matchedLine,
     string promptKey,
@@ -46,11 +38,13 @@ public static class ProcessRunner
     {
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
+        var outputGate = new object();
         var prompts = interactivePrompts ?? new Dictionary<string, string>();
         var needsStdin = redirectStandardInput ||
                          (prompts.Count > 0 && onInteractivePrompt is not null && !string.IsNullOrEmpty(replyText));
-        var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var promptGate = new SemaphoreSlim(1, 1);
+        var answered = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        using var promptGate = new SemaphoreSlim(1, 1);
+        var promptTasks = new ConcurrentBag<Task>();
         var watchPrompts = prompts.Count > 0 && onInteractivePrompt is not null;
 
         var startInfo = new ProcessStartInfo
@@ -65,105 +59,65 @@ public static class ProcessRunner
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
+        if (!string.IsNullOrWhiteSpace(workingDirectory)) startInfo.WorkingDirectory = workingDirectory;
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        if (environment is not null)
         {
-            startInfo.WorkingDirectory = workingDirectory;
-        }
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        if (environment != null)
-        {
-            foreach (var pair in environment)
-            {
-                startInfo.Environment[pair.Key] = pair.Value;
-            }
+            foreach (var pair in environment) startInfo.Environment[pair.Key] = pair.Value;
         }
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-
         var stdoutCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stderrCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         async Task HandlePossiblePromptAsync(string line)
         {
-            if (!watchPrompts || onInteractivePrompt is null || process.HasExited || prompts.Count == 0)
-            {
-                return;
-            }
+            if (!watchPrompts || onInteractivePrompt is null || prompts.Count == 0) return;
 
             string? matchedKey = null;
             foreach (var pair in prompts)
             {
-                if (answered.Contains(pair.Key))
-                {
-                    continue;
-                }
-
-                if (line.Contains(pair.Value, StringComparison.OrdinalIgnoreCase))
+                if (!answered.ContainsKey(pair.Key) &&
+                    line.Contains(pair.Value, StringComparison.OrdinalIgnoreCase))
                 {
                     matchedKey = pair.Key;
                     break;
                 }
             }
-
-            if (matchedKey is null)
-            {
-                return;
-            }
+            if (matchedKey is null) return;
 
             await promptGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (answered.Contains(matchedKey) || process.HasExited)
+                if (answered.ContainsKey(matchedKey) || SafeHasExited(process)) return;
+                var confirmed = await onInteractivePrompt(line, matchedKey, cancellationToken).ConfigureAwait(false);
+                answered.TryAdd(matchedKey, 0);
+
+                if (!confirmed || SafeHasExited(process))
                 {
+                    KillProcessTree(process);
                     return;
                 }
 
-                var confirmed = await onInteractivePrompt(line, matchedKey, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (!confirmed || process.HasExited)
+                if (!string.IsNullOrEmpty(replyText))
                 {
-                    answered.Add(matchedKey);
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            process.Kill(entireProcessTree: true);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore.
-                    }
-
-                    return;
+                    await process.StandardInput.WriteAsync(replyText.AsMemory(), cancellationToken).ConfigureAwait(false);
+                    await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    onStdoutLine?.Invoke($"[prompt] User confirmed '{matchedKey}' - sent stdin reply.");
                 }
-
-                try
+                else
                 {
-                    if (!string.IsNullOrEmpty(replyText))
-                    {
-                        await process.StandardInput.WriteAsync(replyText.AsMemory(), cancellationToken)
-                            .ConfigureAwait(false);
-                        await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
-                        onStdoutLine?.Invoke($"[prompt] User confirmed '{matchedKey}' - sent stdin reply.");
-                    }
-                    else
-                    {
-                        onStdoutLine?.Invoke($"[prompt] User confirmed '{matchedKey}'.");
-                    }
-
-                    answered.Add(matchedKey);
+                    onStdoutLine?.Invoke($"[prompt] User confirmed '{matchedKey}'.");
                 }
-                catch
-                {
-                    // Child may have closed stdin.
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                KillProcessTree(process);
+            }
+            catch (Exception ex)
+            {
+                onStderrLine?.Invoke($"[prompt] Failed to handle prompt '{matchedKey}': {ex.Message}");
+                KillProcessTree(process);
             }
             finally
             {
@@ -171,20 +125,24 @@ public static class ProcessRunner
             }
         }
 
-        void OnOutput(string? data, TaskCompletionSource completion, Action<string>? sink)
+        void QueuePrompt(string line)
         {
-            if (data is null)
-            {
-                completion.TrySetResult();
-                return;
-            }
-
-            stdoutBuilder.AppendLine(data);
-            sink?.Invoke(data);
-            _ = HandlePossiblePromptAsync(data);
+            if (!watchPrompts) return;
+            var task = HandlePossiblePromptAsync(line);
+            promptTasks.Add(task);
         }
 
-        process.OutputDataReceived += (_, e) => OnOutput(e.Data, stdoutCompletion, onStdoutLine);
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null)
+            {
+                stdoutCompletion.TrySetResult();
+                return;
+            }
+            lock (outputGate) stdoutBuilder.AppendLine(e.Data);
+            onStdoutLine?.Invoke(e.Data);
+            QueuePrompt(e.Data);
+        };
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is null)
@@ -192,85 +150,53 @@ public static class ProcessRunner
                 stderrCompletion.TrySetResult();
                 return;
             }
-
-            stderrBuilder.AppendLine(e.Data);
+            lock (outputGate) stderrBuilder.AppendLine(e.Data);
             onStderrLine?.Invoke(e.Data);
-            _ = HandlePossiblePromptAsync(e.Data);
+            QueuePrompt(e.Data);
         };
 
-        if (!process.Start())
-        {
-            throw new InvalidOperationException($"Failed to start process: {fileName}");
-        }
-
+        if (!process.Start()) throw new InvalidOperationException($"Failed to start process: {fileName}");
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        using var registration = cancellationToken.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // Ignore kill failures during cancellation.
-            }
-        });
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (timeout.HasValue) linkedCts.CancelAfter(timeout.Value);
+        using var registration = linkedCts.Token.Register(() => KillProcessTree(process));
 
-        if (timeout.HasValue)
+        try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(timeout.Value);
-            try
-            {
-                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch
-                {
-                    // Ignore kill failures on timeout.
-                }
-
-                throw new TimeoutException($"Process timed out: {fileName}");
-            }
+            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
-        else
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeout.HasValue)
         {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            KillProcessTree(process);
+            await WaitForExitAfterKillAsync(process).ConfigureAwait(false);
+            throw new TimeoutException($"Process timed out after {timeout.Value}: {fileName}");
         }
-
-        if (needsStdin)
+        finally
         {
-            try
+            if (needsStdin)
             {
-                process.StandardInput.Close();
-            }
-            catch
-            {
-                // Ignore.
+                try { process.StandardInput.Close(); } catch { }
             }
         }
 
         await Task.WhenAll(stdoutCompletion.Task, stderrCompletion.Task).ConfigureAwait(false);
-
-        return new ProcessResult
+        var promptsToObserve = promptTasks.ToArray();
+        if (promptsToObserve.Length > 0)
         {
-            ExitCode = process.ExitCode,
-            StandardOutput = stdoutBuilder.ToString().TrimEnd(),
-            StandardError = stderrBuilder.ToString().TrimEnd(),
-        };
+            try { await Task.WhenAll(promptsToObserve).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        }
+
+        string stdout;
+        string stderr;
+        lock (outputGate)
+        {
+            stdout = stdoutBuilder.ToString().TrimEnd();
+            stderr = stderrBuilder.ToString().TrimEnd();
+        }
+        return new ProcessResult { ExitCode = process.ExitCode, StandardOutput = stdout, StandardError = stderr };
     }
 
     public static Task<ProcessResult> RunPowerShellAsync(
@@ -278,20 +204,23 @@ public static class ProcessRunner
         string? workingDirectory = null,
         CancellationToken cancellationToken = default,
         Action<string>? onStdoutLine = null,
-        Action<string>? onStderrLine = null)
+        Action<string>? onStderrLine = null,
+        TimeSpan? timeout = null)
     {
         return RunAsync(
             "powershell.exe",
-            new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script },
+            new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script },
             workingDirectory,
             cancellationToken: cancellationToken,
             onStdoutLine: onStdoutLine,
-            onStderrLine: onStderrLine);
+            onStderrLine: onStderrLine,
+            timeout: timeout ?? TimeSpan.FromMinutes(10));
     }
 
     /// <summary>
-    /// Synchronous process runner for callers that cannot use async (e.g. property getters,
-    /// timer callbacks). Avoids the sync-over-async .GetAwaiter().GetResult() anti-pattern.
+    /// Synchronous process runner for callers that cannot use async. Both redirected
+    /// streams are drained concurrently before waiting, preventing the classic full-pipe
+    /// deadlock that used to bypass the timeout entirely.
     /// </summary>
     public static ProcessResult Run(
         string fileName,
@@ -309,53 +238,74 @@ public static class ProcessRunner
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
-        {
-            startInfo.WorkingDirectory = workingDirectory;
-        }
-
-        foreach (var arg in arguments)
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
+        if (!string.IsNullOrWhiteSpace(workingDirectory)) startInfo.WorkingDirectory = workingDirectory;
+        foreach (var arg in arguments) startInfo.ArgumentList.Add(arg);
 
         try
         {
             using var process = Process.Start(startInfo);
-            if (process is null)
+            if (process is null) return new ProcessResult { ExitCode = -1 };
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var wait = timeout ?? TimeSpan.FromMinutes(2);
+            if (!process.WaitForExit((int)Math.Min(int.MaxValue, wait.TotalMilliseconds)))
             {
-                return new ProcessResult { ExitCode = -1 };
+                KillProcessTree(process);
+                try { process.WaitForExit(5000); } catch { }
+                ObserveTask(stdoutTask);
+                ObserveTask(stderrTask);
+                return new ProcessResult
+                {
+                    ExitCode = -1,
+                    StandardError = $"Process timed out after {wait}: {fileName}",
+                };
             }
 
-            var stdout = process.StandardOutput.ReadToEnd();
-            var stderr = process.StandardError.ReadToEnd();
-
-            var waitMs = (int)(timeout ?? TimeSpan.FromMinutes(2)).TotalMilliseconds;
-            if (!process.WaitForExit(waitMs))
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch
-                {
-                    // Ignore.
-                }
-
-                return new ProcessResult { ExitCode = -1 };
-            }
-
+            Task.WhenAll(stdoutTask, stderrTask).GetAwaiter().GetResult();
             return new ProcessResult
             {
                 ExitCode = process.ExitCode,
-                StandardOutput = stdout.TrimEnd(),
-                StandardError = stderr.TrimEnd(),
+                StandardOutput = stdoutTask.Result.TrimEnd(),
+                StandardError = stderrTask.Result.TrimEnd(),
             };
+        }
+        catch (Exception ex)
+        {
+            return new ProcessResult { ExitCode = -1, StandardError = ex.Message };
+        }
+    }
+
+    private static bool SafeHasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch { return true; }
+    }
+
+    private static void KillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
         }
         catch
         {
-            return new ProcessResult { ExitCode = -1 };
+            // Best effort during cancellation/timeout.
         }
+    }
+
+    private static async Task WaitForExitAfterKillAsync(Process process)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch { }
+    }
+
+    private static void ObserveTask(Task task)
+    {
+        try { task.Wait(TimeSpan.FromSeconds(2)); } catch { }
     }
 }

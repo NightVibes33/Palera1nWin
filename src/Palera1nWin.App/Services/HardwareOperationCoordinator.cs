@@ -5,6 +5,8 @@ public enum HardwareOperationKind
     None = 0,
     Diagnostics,
     DriverRepair,
+    WslProvision,
+    RuntimeUpdate,
     Jailbreak,
     Downgrade,
     DowngradeRecovery,
@@ -17,9 +19,7 @@ public sealed record HardwareOperationState(
     string? Detail,
     DateTimeOffset? StartedAt)
 {
-    public static HardwareOperationState Idle { get; } =
-        new(HardwareOperationKind.None, null, null);
-
+    public static HardwareOperationState Idle { get; } = new(HardwareOperationKind.None, null, null);
     public bool IsBusy => Operation != HardwareOperationKind.None;
 }
 
@@ -27,8 +27,8 @@ public sealed class HardwareOperationBusyException : InvalidOperationException
 {
     public HardwareOperationBusyException(HardwareOperationKind requested, HardwareOperationState active)
         : base(active.IsBusy
-            ? $"Cannot start {requested} while {active.Operation} is active. Cancel or finish the active hardware operation first."
-            : $"Cannot start {requested} because the hardware operation lock is unavailable.")
+            ? $"Cannot start {requested} while {active.Operation} is active. Cancel or finish the active operation first."
+            : $"Cannot start {requested} because the operation lock is unavailable.")
     {
         Requested = requested;
         Active = active;
@@ -38,42 +38,39 @@ public sealed class HardwareOperationBusyException : InvalidOperationException
     public HardwareOperationState Active { get; }
 }
 
-public sealed class HardwareOperationCoordinator
+public sealed class HardwareOperationCoordinator : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _sync = new();
     private HardwareOperationState _state = HardwareOperationState.Idle;
+    private bool _disposed;
 
     public event EventHandler<HardwareOperationState>? StateChanged;
 
     public HardwareOperationState Current
     {
-        get
-        {
-            lock (_sync)
-            {
-                return _state;
-            }
-        }
+        get { lock (_sync) return _state; }
     }
 
     public async Task<HardwareOperationLease> AcquireAsync(
         HardwareOperationKind operation,
         string? detail,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
-        if (operation == HardwareOperationKind.None)
-        {
-            throw new ArgumentOutOfRangeException(nameof(operation));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (operation == HardwareOperationKind.None) throw new ArgumentOutOfRangeException(nameof(operation));
+
+        // Diagnostics may be needed to explain an incomplete package. Every action
+        // that can mutate drivers, WSL, USB ownership, firmware, or boot state must
+        // first prove that its elevated executable/toolchain files still match the
+        // package manifest created by CI.
+        if (operation != HardwareOperationKind.Diagnostics)
+            await PackageIntegrityVerifier.EnsureValidAsync(cancellationToken).ConfigureAwait(false);
 
         if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
-        {
             throw new HardwareOperationBusyException(operation, Current);
-        }
 
-        var next = new HardwareOperationState(operation, detail, DateTimeOffset.UtcNow);
-        SetState(next);
+        SetState(new HardwareOperationState(operation, detail, DateTimeOffset.UtcNow));
         return new HardwareOperationLease(this, operation);
     }
 
@@ -82,42 +79,51 @@ public sealed class HardwareOperationCoordinator
         HardwareOperationState? next = null;
         lock (_sync)
         {
-            if (_state.Operation != operation)
-            {
-                return;
-            }
-
+            if (_state.Operation != operation) return;
             _state = _state with { Detail = detail };
             next = _state;
         }
-
-        StateChanged?.Invoke(this, next);
+        RaiseStateChanged(next);
     }
 
     private void SetState(HardwareOperationState state)
     {
-        lock (_sync)
-        {
-            _state = state;
-        }
+        lock (_sync) _state = state;
+        RaiseStateChanged(state);
+    }
 
-        StateChanged?.Invoke(this, state);
+    private void RaiseStateChanged(HardwareOperationState state)
+    {
+        var handlers = StateChanged;
+        if (handlers is null) return;
+        foreach (EventHandler<HardwareOperationState> handler in handlers.GetInvocationList())
+        {
+            try { handler(this, state); }
+            catch { }
+        }
     }
 
     internal void Release(HardwareOperationKind operation)
     {
+        var release = false;
         lock (_sync)
         {
-            if (_state.Operation != operation)
+            if (_state.Operation == operation)
             {
-                return;
+                _state = HardwareOperationState.Idle;
+                release = true;
             }
-
-            _state = HardwareOperationState.Idle;
         }
-
+        if (!release) return;
         _gate.Release();
-        StateChanged?.Invoke(this, HardwareOperationState.Idle);
+        RaiseStateChanged(HardwareOperationState.Idle);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _gate.Dispose();
     }
 }
 
@@ -133,7 +139,6 @@ public sealed class HardwareOperationLease : IAsyncDisposable, IDisposable
     }
 
     public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release(_operation);
-
     public ValueTask DisposeAsync()
     {
         Dispose();

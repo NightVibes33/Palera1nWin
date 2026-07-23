@@ -125,10 +125,15 @@ int wmain(int argc, wchar_t **argv)
     }
     free(command);
 
-    const DWORD timeout_ms = 120000;
+    const DWORD total_timeout_ms = 120000;
+    const DWORD post_exit_grace_ms = 20000;
     DWORD elapsed = 0;
+    DWORD child_exit_elapsed = 0;
+    DWORD child_exit_code = STILL_ACTIVE;
+    int child_exited = 0;
     int pongo_seen = 0;
-    while (elapsed < timeout_ms) {
+
+    while (elapsed < total_timeout_ms) {
         if (pongo_is_present()) {
             pongo_seen = 1;
             fwprintf(stdout, L"[DarkSword] PongoOS USB 05AC:4141 enumerated. Returning control to the managed driver/probe pipeline.\n");
@@ -136,10 +141,21 @@ int wmain(int argc, wchar_t **argv)
             break;
         }
 
-        DWORD wait = WaitForSingleObject(process.hProcess, 250);
-        if (wait == WAIT_OBJECT_0) break;
+        if (!child_exited && WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) {
+            child_exited = 1;
+            GetExitCodeProcess(process.hProcess, &child_exit_code);
+            child_exit_elapsed = 0;
+            fwprintf(stdout,
+                L"[DarkSword] openra1n-core.exe exited with code %lu after the USB payload stage; allowing %lu ms for PongoOS re-enumeration.\n",
+                child_exit_code,
+                post_exit_grace_ms);
+            fflush(stdout);
+        }
+
+        if (child_exited && child_exit_elapsed >= post_exit_grace_ms) break;
         Sleep(250);
-        elapsed += 500;
+        elapsed += 250;
+        if (child_exited) child_exit_elapsed += 250;
     }
 
     DWORD exit_code = 1;
@@ -150,9 +166,12 @@ int wmain(int argc, wchar_t **argv)
             WaitForSingleObject(process.hProcess, 3000);
         }
         exit_code = 0;
-    } else if (WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) {
-        GetExitCodeProcess(process.hProcess, &exit_code);
-        fwprintf(stderr, L"[DarkSword] openra1n-core.exe exited before PongoOS (code=%lu).\n", exit_code);
+    } else if (child_exited) {
+        fwprintf(stderr,
+            L"[DarkSword] openra1n-core.exe exited (code=%lu), and PongoOS did not enumerate during the %lu ms grace period.\n",
+            child_exit_code,
+            post_exit_grace_ms);
+        exit_code = child_exit_code == 0 ? 95 : child_exit_code;
     } else {
         fwprintf(stderr, L"[DarkSword] Timed out waiting for PongoOS USB 05AC:4141.\n");
         TerminateProcess(process.hProcess, 94);
