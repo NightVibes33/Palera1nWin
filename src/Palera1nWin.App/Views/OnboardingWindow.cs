@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using Palera1nWin.App.Services;
 
@@ -7,23 +8,38 @@ namespace Palera1nWin.App.Views;
 
 public sealed class OnboardingWindow : Window
 {
-    private static readonly Brush WindowBrush = new SolidColorBrush(Color.FromRgb(18, 20, 25));
-    private static readonly Brush PanelBrush = new SolidColorBrush(Color.FromRgb(29, 33, 41));
-    private static readonly Brush PanelAltBrush = new SolidColorBrush(Color.FromRgb(37, 42, 52));
-    private static readonly Brush StrokeBrush = new SolidColorBrush(Color.FromRgb(58, 66, 80));
-    private static readonly Brush MutedBrush = new SolidColorBrush(Color.FromRgb(174, 181, 193));
-    private static readonly Brush AccentBrush = new SolidColorBrush(Color.FromRgb(67, 210, 194));
-    private static readonly Brush WarningBrush = new SolidColorBrush(Color.FromRgb(255, 194, 92));
-    private static readonly Brush DangerBrush = new SolidColorBrush(Color.FromRgb(255, 116, 116));
+    private static readonly Brush WindowBrush = new SolidColorBrush(Color.FromRgb(13, 16, 23));
+    private static readonly Brush PanelBrush = new SolidColorBrush(Color.FromRgb(21, 26, 36));
+    private static readonly Brush PanelAltBrush = new SolidColorBrush(Color.FromRgb(27, 33, 48));
+    private static readonly Brush StrokeBrush = new SolidColorBrush(Color.FromRgb(53, 64, 87));
+    private static readonly Brush TextBrush = new SolidColorBrush(Color.FromRgb(244, 247, 251));
+    private static readonly Brush MutedBrush = new SolidColorBrush(Color.FromRgb(193, 201, 216));
+    private static readonly Brush TertiaryBrush = new SolidColorBrush(Color.FromRgb(154, 165, 184));
+    private static readonly Brush AccentBrush = new SolidColorBrush(Color.FromRgb(45, 212, 191));
+    private static readonly Brush WarningBrush = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+    private static readonly Brush DangerBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+    private static readonly Brush SuccessBrush = new SolidColorBrush(Color.FromRgb(52, 211, 153));
+
+    private static readonly OnboardingSection[] SectionOrder =
+    {
+        OnboardingSection.Overview,
+        OnboardingSection.Jailbreak,
+        OnboardingSection.Downgrade,
+        OnboardingSection.ColdBoot,
+    };
 
     private readonly OnboardingState _state;
     private readonly Action<int>? _navigate;
     private readonly StackPanel _sectionContent = new();
     private readonly TextBlock _sectionTitle = new();
     private readonly TextBlock _sectionSubtitle = new();
+    private readonly TextBlock _sectionProgress = new();
     private readonly CheckBox _sectionComplete = new();
     private readonly CheckBox _hideAutomatic = new();
     private readonly Button _openWorkflowButton = new();
+    private readonly Button _previousButton = new();
+    private readonly Button _nextButton = new();
+    private readonly Dictionary<OnboardingSection, Button> _navigationButtons = new();
     private OnboardingSection _section;
 
     public OnboardingWindow(
@@ -36,15 +52,16 @@ public sealed class OnboardingWindow : Window
         _section = initialSection;
 
         Title = "Palera1nWin Setup Guide";
-        Width = 920;
-        Height = 760;
+        Width = 940;
+        Height = 780;
         MinWidth = 760;
         MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = WindowBrush;
-        Foreground = Brushes.White;
+        Foreground = TextBrush;
 
         Content = BuildLayout();
+        TextElement.SetForeground(this, TextBrush);
         Loaded += (_, _) =>
         {
             OnboardingStateStore.MarkViewed(_state);
@@ -78,7 +95,7 @@ public sealed class OnboardingWindow : Window
 
     private UIElement BuildLayout()
     {
-        var root = new Grid();
+        var root = new Grid { Background = WindowBrush };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -99,10 +116,11 @@ public sealed class OnboardingWindow : Window
                         Text = "Palera1nWin onboarding",
                         FontSize = 28,
                         FontWeight = FontWeights.Bold,
+                        Foreground = TextBrush,
                     },
                     new TextBlock
                     {
-                        Text = "Choose the correct workflow, understand what changes, and know exactly what to do after a reboot or downgrade.",
+                        Text = "Choose one goal, follow the matching workflow, and know what must be repeated after a reboot.",
                         FontSize = 14,
                         Foreground = MutedBrush,
                         Margin = new Thickness(0, 7, 0, 0),
@@ -114,23 +132,27 @@ public sealed class OnboardingWindow : Window
         Grid.SetRow(header, 0);
         root.Children.Add(header);
 
-        var navigation = new WrapPanel
-        {
-            Margin = new Thickness(24, 16, 24, 12),
-        };
-        navigation.Children.Add(CreateNavButton("Overview", OnboardingSection.Overview));
-        navigation.Children.Add(CreateNavButton("Jailbreak", OnboardingSection.Jailbreak));
-        navigation.Children.Add(CreateNavButton("Downgrade", OnboardingSection.Downgrade));
-        navigation.Children.Add(CreateNavButton("Cold Boot", OnboardingSection.ColdBoot));
-        Grid.SetRow(navigation, 1);
-        root.Children.Add(navigation);
+        var navigationGrid = new Grid { Margin = new Thickness(24, 16, 24, 12) };
+        navigationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        navigationGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var navigation = new WrapPanel();
+        AddNavigationButton(navigation, "Overview", OnboardingSection.Overview);
+        AddNavigationButton(navigation, "Jailbreak", OnboardingSection.Jailbreak);
+        AddNavigationButton(navigation, "Downgrade", OnboardingSection.Downgrade);
+        AddNavigationButton(navigation, "Cold Boot", OnboardingSection.ColdBoot);
+        navigationGrid.Children.Add(navigation);
+        _sectionProgress.Foreground = TertiaryBrush;
+        _sectionProgress.FontWeight = FontWeights.SemiBold;
+        _sectionProgress.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(_sectionProgress, 1);
+        navigationGrid.Children.Add(_sectionProgress);
+        Grid.SetRow(navigationGrid, 1);
+        root.Children.Add(navigationGrid);
 
-        var contentPanel = new StackPanel
-        {
-            Margin = new Thickness(26, 8, 26, 22),
-        };
+        var contentPanel = new StackPanel { Margin = new Thickness(26, 8, 26, 22) };
         _sectionTitle.FontSize = 23;
         _sectionTitle.FontWeight = FontWeights.Bold;
+        _sectionTitle.Foreground = TextBrush;
         _sectionSubtitle.FontSize = 13;
         _sectionSubtitle.Foreground = MutedBrush;
         _sectionSubtitle.TextWrapping = TextWrapping.Wrap;
@@ -154,14 +176,12 @@ public sealed class OnboardingWindow : Window
         };
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var footerLeft = new StackPanel
-        {
-            Margin = new Thickness(24, 14, 16, 14),
-        };
-        _sectionComplete.Foreground = Brushes.White;
+
+        var footerLeft = new StackPanel { Margin = new Thickness(24, 14, 16, 14) };
+        _sectionComplete.Foreground = TextBrush;
         _sectionComplete.Margin = new Thickness(0, 0, 0, 7);
         _sectionComplete.Checked += (_, _) => SaveSectionCompletion();
-        _hideAutomatic.Content = "I understand all three workflows; do not open this guide automatically again";
+        _hideAutomatic.Content = "I understand these workflows; do not open this guide automatically again";
         _hideAutomatic.Foreground = MutedBrush;
         footerLeft.Children.Add(_sectionComplete);
         footerLeft.Children.Add(_hideAutomatic);
@@ -174,17 +194,32 @@ public sealed class OnboardingWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 12, 24, 12),
         };
+        _previousButton.Content = "Back";
+        _previousButton.Padding = new Thickness(16, 9, 16, 9);
+        _previousButton.Margin = new Thickness(0, 0, 8, 0);
+        _previousButton.Click += (_, _) => MoveSection(-1);
+        StyleButton(_previousButton, primary: false);
+
+        _nextButton.Padding = new Thickness(16, 9, 16, 9);
+        _nextButton.Margin = new Thickness(0, 0, 8, 0);
+        _nextButton.Click += (_, _) => MoveSection(1);
+        StyleButton(_nextButton, primary: false);
+
         _openWorkflowButton.Padding = new Thickness(18, 9, 18, 9);
-        _openWorkflowButton.Margin = new Thickness(0, 0, 10, 0);
+        _openWorkflowButton.Margin = new Thickness(0, 0, 8, 0);
         _openWorkflowButton.Click += (_, _) => OpenCurrentWorkflow();
         StyleButton(_openWorkflowButton, primary: true);
+
         var closeButton = new Button
         {
-            Content = "Finish",
+            Content = "Close guide",
             Padding = new Thickness(18, 9, 18, 9),
         };
         StyleButton(closeButton, primary: false);
         closeButton.Click += (_, _) => Finish();
+
+        footerButtons.Children.Add(_previousButton);
+        footerButtons.Children.Add(_nextButton);
         footerButtons.Children.Add(_openWorkflowButton);
         footerButtons.Children.Add(closeButton);
         Grid.SetColumn(footerButtons, 1);
@@ -195,7 +230,7 @@ public sealed class OnboardingWindow : Window
         return root;
     }
 
-    private Button CreateNavButton(string label, OnboardingSection section)
+    private void AddNavigationButton(Panel navigation, string label, OnboardingSection section)
     {
         var button = new Button
         {
@@ -204,9 +239,9 @@ public sealed class OnboardingWindow : Window
             Margin = new Thickness(0, 0, 9, 0),
             Tag = section,
         };
-        StyleButton(button, primary: section == _section);
         button.Click += (_, _) => ShowSection(section);
-        return button;
+        _navigationButtons[section] = button;
+        navigation.Children.Add(button);
     }
 
     private void ShowSection(OnboardingSection section)
@@ -230,6 +265,16 @@ public sealed class OnboardingWindow : Window
                 break;
         }
 
+        foreach (var pair in _navigationButtons)
+        {
+            StyleButton(pair.Value, primary: pair.Key == section);
+        }
+
+        var index = Array.IndexOf(SectionOrder, section);
+        _sectionProgress.Text = $"Guide {index + 1} of {SectionOrder.Length}";
+        _previousButton.IsEnabled = index > 0;
+        _nextButton.Content = index == SectionOrder.Length - 1 ? "Finish" : "Next";
+
         _sectionComplete.IsEnabled = section != OnboardingSection.Overview;
         _sectionComplete.IsChecked = section switch
         {
@@ -239,79 +284,129 @@ public sealed class OnboardingWindow : Window
             _ => false,
         };
         _sectionComplete.Content = section == OnboardingSection.Overview
-            ? "Open each workflow guide before performing hardware operations"
+            ? "Open the guide for the workflow you plan to use"
             : $"I read and understand the {SectionName(section)} guide";
+
         _openWorkflowButton.Visibility = section == OnboardingSection.Overview
             ? Visibility.Collapsed
             : Visibility.Visible;
         _openWorkflowButton.Content = section == OnboardingSection.Jailbreak
             ? "Open Jailbreak tab"
-            : "Open Downgrade tab";
+            : section == OnboardingSection.Downgrade
+                ? "Open Downgrade tab"
+                : "Open Boot Device";
+    }
+
+    private void MoveSection(int direction)
+    {
+        var index = Array.IndexOf(SectionOrder, _section);
+        if (direction > 0 && index == SectionOrder.Length - 1)
+        {
+            Finish();
+            return;
+        }
+
+        var next = Math.Clamp(index + direction, 0, SectionOrder.Length - 1);
+        ShowSection(SectionOrder[next]);
     }
 
     private void RenderOverview()
     {
-        _sectionTitle.Text = "Pick the workflow that matches your goal";
-        _sectionSubtitle.Text = "Jailbreak and downgrade are different operations. Cold Boot is the repeatable boot procedure required after a tethered downgrade.";
-        AddCallout("Only one hardware workflow runs at a time", "The app locks Apple USB ownership while Jailbreak, Downgrade, Recovery, or Cold Boot is active. Do not run separate gaster, Zadig, usbipd, or openra1n commands beside the app.", WarningBrush);
-        AddWorkflowCard("Jailbreak", "Keep the currently installed firmware and boot palera1n. After a full reboot, run the Jailbreak workflow again to re-enable the jailbreak.", "Does not downgrade or erase firmware.");
-        AddWorkflowCard("Downgrade", "Erase the device and install a supported iOS/iPadOS 15 build using the DarkSword restore path. The non-destructive DFU → PongoOS test must pass first.", "Creates a device-specific session and boot profile.");
-        AddWorkflowCard("Cold Boot", "Boot a device that was already downgraded. Use the saved boot-profile.json after every shutdown, restart, or dead battery.", "Does not repeat the downgrade.");
+        _sectionTitle.Text = "Choose the workflow that matches your goal";
+        _sectionSubtitle.Text = "The three workflows share USB tools, but they do different jobs. Only run one at a time.";
+        AddCallout(
+            "Fast decision",
+            "Keep the installed firmware and add a jailbreak: use Jailbreak. Install iOS/iPadOS 15 and erase the device: use Downgrade. Start an already-downgraded device after power-off: use Boot Device.",
+            AccentBrush);
+        AddWorkflowCard(
+            "Jailbreak",
+            "Keeps the firmware currently installed and starts palera1n. A full reboot removes the active jailbreak state, so run the Jailbreak workflow again.",
+            "No firmware downgrade and no planned erase.");
+        AddWorkflowCard(
+            "Downgrade",
+            "Erases the device and installs a supported iOS/iPadOS 15 IPSW through the DarkSword restore path. Device model and ECID are detected automatically.",
+            "Creates a device-specific session and boot-profile.json.");
+        AddWorkflowCard(
+            "Cold Boot",
+            "Starts a device that was already downgraded. Use Boot Device after every shutdown, restart, or dead battery.",
+            "Does not repeat the restore or erase the device.");
+        AddCallout(
+            "Do not run separate USB tools beside the app",
+            "Palera1nWin controls Apple USB ownership, drivers, openra1n, PongoOS, and WSL as one transaction. Close Zadig, gaster, usbipd terminals, and other jailbreak tools while an operation is active.",
+            WarningBrush);
     }
 
     private void RenderJailbreak()
     {
         _sectionTitle.Text = "Jailbreak onboarding";
         _sectionSubtitle.Text = "Use this path to jailbreak the firmware already installed on the device.";
-        AddCallout("Before you start", "Run Palera1nWin as Administrator, complete Setup, keep WSL/Ubuntu available, use a reliable data cable, and close iTunes or Apple Devices if it is actively syncing.", AccentBrush);
-        AddStep(1, "Choose the mode", "Rootless is recommended. Rootful changes the system volume and uses more storage. Safe Mode boots without tweak injection; Verbose Boot shows detailed boot output.");
-        AddStep(2, "Press Start Jailbreak", "The app validates the shared toolchain, stops conflicting Apple services only for the transaction, and guides the device into DFU.");
-        AddStep(3, "Follow the DFU prompts", "The screen must remain black in DFU. The app transfers USB ownership between Windows and WSL, verifies the DFU driver, runs openra1n, verifies PongoOS, and then runs palera1n.");
-        AddStep(4, "After the device boots", "Install or open the palera1n loader/bootstrap shown on the device. A normal reboot removes the active jailbreak state; return to this tab and run Start Jailbreak again.");
-        AddCallout("Do not use the Cold Boot button for a normal jailbreak", "Cold Boot is only for a DarkSword-downgraded device with a matching boot-profile.json. A stock-firmware palera1n reboot belongs in the Jailbreak tab.", DangerBrush);
+        AddCallout(
+            "Before you start",
+            "Run Palera1nWin as Administrator, finish Setup, keep WSL available, connect only the target Apple device, and use a reliable data cable connected directly to the PC.",
+            AccentBrush);
+        AddStep(1, "Choose the jailbreak options", "Rootless is recommended. Rootful uses more storage. Safe Mode disables tweak injection, and Verbose Boot shows detailed boot output.");
+        AddStep(2, "Press Start Jailbreak", "The app verifies the packaged runtime, confirms one connected Apple device, and guides the device into DFU.");
+        AddStep(3, "Follow the timed DFU instructions", "The screen must remain completely black. The app performs the Windows/WSL USB handoff, verifies drivers, runs openra1n, confirms PongoOS, and starts palera1n.");
+        AddStep(4, "Finish on the device", "Open the loader/bootstrap shown after boot. After a full reboot, return to Jailbreak and press Start Jailbreak again.");
+        AddCallout(
+            "Jailbreak does not use Boot Device",
+            "Boot Device is reserved for a DarkSword-downgraded device with a matching boot-profile.json.",
+            WarningBrush);
     }
 
     private void RenderDowngrade()
     {
         _sectionTitle.Text = "Downgrade onboarding";
-        _sectionSubtitle.Text = "This is a destructive, tethered restore. Read every stage before selecting Start Full Downgrade.";
-        AddCallout("The downgrade erases the device", "Create an encrypted Apple Devices/iTunes backup, separately copy photos and files, save authenticator recovery codes, and know the Apple ID password used by Activation Lock.", DangerBrush);
-        AddStep(1, "Connect and identify the exact device", "The app reads ProductType automatically. Never choose a model manually or use an IPSW for a different ProductType.");
-        AddStep(2, "Select and inspect the iOS/iPadOS 15 IPSW", "The app verifies BuildManifest, target ProductType, version, file size, and hashes before it can be used.");
-        AddStep(3, "Run Test DFU → PongoOS", "This is non-destructive. It proves the USB driver transaction, checkm8, PongoOS enumeration, and bridge access before any firmware is erased.");
-        AddStep(4, "Complete preflight and confirmations", "Confirm the backup, tethered-boot requirement, ownership, Activation Lock preparation, and type the exact ProductType shown by the app.");
-        AddStep(5, "Start Full Downgrade", "The app captures and validates SHC/PTE artifacts, restores firmware, creates the exact-device cold-boot profile, and performs the first tethered boot.");
-        AddCallout("Keep the entire session folder", "The session folder contains boot-profile.json, the device-specific PTE file, metadata, hashes, and restore state. Back up the whole folder to another drive.", WarningBrush);
+        _sectionSubtitle.Text = "The visible Downgrade screen has four actions. The app performs device detection and technical checks automatically.";
+        AddCallout(
+            "The downgrade erases the device",
+            "Back up photos and files, save authenticator recovery codes, and know the Apple ID password used by Activation Lock before approving the final erase confirmation.",
+            DangerBrush);
+
+        AddButtonExplanation("Start Downgrade", "The normal one-button path. Enter clean DFU, press this button, select the iOS/iPadOS 15 IPSW, and approve one final erase confirmation. The app runs DFU → Pwned/Pongo automatically when needed.", SuccessBrush);
+        AddButtonExplanation("Test DFU → Pwned/Pongo", "Optional and non-destructive. Use it to prove the cable, driver, checkm8, PongoOS enumeration, and bridge before starting the erase.", AccentBrush);
+        AddButtonExplanation("Boot Device", "Use only after a completed downgrade. It starts the tethered iOS/iPadOS 15 installation after every shutdown or restart.", WarningBrush);
+        AddButtonExplanation("Import Boot Profile", "Loads boot-profile.json from a completed DarkSword session when it is not auto-loaded. Do not select a raw PTE file.", TertiaryBrush);
+
+        AddStep(1, "Enter clean DFU", "Connect only the target iPad. DFU has a completely black screen; the recovery cable/computer screen is not DFU.");
+        AddStep(2, "Press Start Downgrade and select the IPSW", "The app reads BuildManifest, verifies iOS/iPadOS 15, matches ProductType automatically, records ECID, and checks the IPSW hash.");
+        AddStep(3, "Approve the final erase confirmation", "No model name typing or checkbox maze is required. A real wrong-device, wrong-IPSW, missing-file, or integrity mismatch still stops the operation automatically.");
+        AddStep(4, "Keep the completed session folder", "After restore, the app creates boot-profile.json plus the device-specific PTE and metadata. Back up the entire folder to another drive.");
+        AddCallout(
+            "Normal fastest path",
+            "Enter DFU → press Start Downgrade → select the correct iOS 15 IPSW → approve the erase → wait. The separate Test button is optional.",
+            AccentBrush);
     }
 
     private void RenderColdBoot()
     {
         _sectionTitle.Text = "Cold Boot onboarding";
-        _sectionSubtitle.Text = "Use this every time a DarkSword-downgraded device fully powers off, restarts, or loses its battery charge.";
-        AddCallout("Required file: boot-profile.json", "Import boot-profile.json from the completed DarkSword session. The app automatically finds it for the same ECID when available. A raw PTE .bin by itself is intentionally blocked.", AccentBrush);
-        AddStep(1, "Open Palera1nWin and connect the downgraded device", "The Downgrade tab shows the saved target version, build, session, ProductType, and ECID suffix when the profile is loaded.");
-        AddStep(2, "Enter DFU mode", "Use the timed DFU guide. The device screen stays completely black. Recovery mode with a cable/computer image is not DFU.");
-        AddStep(3, "Press Boot Device", "Before any payload is sent, the app rechecks ProductType, ECID, PTE hash, sep_racer.bin, and kpf.bin against the saved profile.");
-        AddStep(4, "Wait for iOS/iPadOS 15 to start", "The app obtains PongoOS, loads the saved SEP/PTE/KPF boot plan, sends one final boot command, and waits for the device to return.");
-        AddCallout("Back up the complete session folder", "Do not move only boot-profile.json and delete the referenced PTE. Keep both files and their metadata together. Use Open Session Folder from the Cold Boot card to locate them.", WarningBrush);
-        AddCallout("When Boot Device is blocked", "Import the correct boot-profile.json, reconnect the exact device, enter DFU, and review the message. Never fix a mismatch by editing the JSON or selecting another device's PTE.", DangerBrush);
+        _sectionSubtitle.Text = "Use this after every full shutdown, restart, or dead battery on a DarkSword-downgraded device.";
+        AddCallout(
+            "Required file: boot-profile.json",
+            "The app normally auto-loads the matching profile. Use Import Boot Profile when moving the session to another PC or when automatic discovery does not find it.",
+            AccentBrush);
+        AddStep(1, "Keep the complete session folder", "boot-profile.json, the PTE file, metadata, sep_racer.bin, and kpf.bin must remain available. Do not edit the JSON.");
+        AddStep(2, "Connect the exact downgraded device and enter DFU", "The screen remains completely black. The app rechecks ProductType and ECID before sending boot payloads.");
+        AddStep(3, "Press Boot Device", "The app verifies the saved profile and hashes, obtains PongoOS, loads the SEP/PTE/KPF plan, and sends the final boot command.");
+        AddStep(4, "Wait for iOS/iPadOS 15 to start", "Leave the cable connected until the device returns. This boot does not erase the device or repeat the downgrade.");
+        AddCallout(
+            "When Boot Device is blocked",
+            "Import the correct boot-profile.json and reconnect the exact device. Never bypass an ECID or hash mismatch by editing the profile or selecting another device's PTE.",
+            DangerBrush);
     }
 
     private void AddWorkflowCard(string title, string body, string footer)
     {
         var panel = new StackPanel();
-        panel.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontSize = 18,
-            FontWeight = FontWeights.SemiBold,
-        });
+        panel.Children.Add(PrimaryText(title, 18, FontWeights.SemiBold));
         panel.Children.Add(new TextBlock
         {
             Text = body,
             Foreground = MutedBrush,
             Margin = new Thickness(0, 6, 0, 8),
             TextWrapping = TextWrapping.Wrap,
+            LineHeight = 20,
         });
         panel.Children.Add(new TextBlock
         {
@@ -319,6 +414,27 @@ public sealed class OnboardingWindow : Window
             Foreground = AccentBrush,
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
+        });
+        _sectionContent.Children.Add(CreateCard(panel));
+    }
+
+    private void AddButtonExplanation(string title, string detail, Brush accent)
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = accent,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = detail,
+            Foreground = MutedBrush,
+            Margin = new Thickness(0, 5, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 20,
         });
         _sectionContent.Children.Add(CreateCard(panel));
     }
@@ -346,12 +462,7 @@ public sealed class OnboardingWindow : Window
         };
         grid.Children.Add(badge);
         var text = new StackPanel();
-        text.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontSize = 16,
-            FontWeight = FontWeights.SemiBold,
-        });
+        text.Children.Add(PrimaryText(title, 16, FontWeights.SemiBold));
         text.Children.Add(new TextBlock
         {
             Text = detail,
@@ -378,7 +489,7 @@ public sealed class OnboardingWindow : Window
         panel.Children.Add(new TextBlock
         {
             Text = detail,
-            Foreground = Brushes.White,
+            Foreground = TextBrush,
             Margin = new Thickness(0, 6, 0, 0),
             TextWrapping = TextWrapping.Wrap,
             LineHeight = 20,
@@ -388,23 +499,37 @@ public sealed class OnboardingWindow : Window
         _sectionContent.Children.Add(card);
     }
 
-    private static Border CreateCard(UIElement child) => new()
+    private static TextBlock PrimaryText(string text, double fontSize, FontWeight weight) => new()
     {
-        Background = PanelAltBrush,
-        BorderBrush = StrokeBrush,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(16),
-        Margin = new Thickness(0, 0, 0, 12),
-        Child = child,
+        Text = text,
+        FontSize = fontSize,
+        FontWeight = weight,
+        Foreground = TextBrush,
+        TextWrapping = TextWrapping.Wrap,
     };
+
+    private static Border CreateCard(UIElement child)
+    {
+        var card = new Border
+        {
+            Background = PanelAltBrush,
+            BorderBrush = StrokeBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = child,
+        };
+        TextElement.SetForeground(card, TextBrush);
+        return card;
+    }
 
     private static void StyleButton(Button button, bool primary)
     {
         button.BorderThickness = new Thickness(1);
         button.BorderBrush = primary ? AccentBrush : StrokeBrush;
         button.Background = primary ? AccentBrush : PanelAltBrush;
-        button.Foreground = primary ? Brushes.Black : Brushes.White;
+        button.Foreground = primary ? Brushes.Black : TextBrush;
         button.FontWeight = FontWeights.SemiBold;
     }
 
