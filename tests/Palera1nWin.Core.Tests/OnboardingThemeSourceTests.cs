@@ -6,14 +6,22 @@ public sealed class OnboardingThemeSourceTests
 {
     private static string RepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Palera1nWin.sln")))
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
         {
-            directory = directory.Parent;
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var marker = Path.Combine(
+                    directory.FullName,
+                    "src",
+                    "Palera1nWin.App",
+                    "Palera1nWin.App.csproj");
+                if (File.Exists(marker)) return directory.FullName;
+                directory = directory.Parent;
+            }
         }
 
-        return directory?.FullName
-            ?? throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
+        throw new DirectoryNotFoundException("Could not locate the repository root from the current or test output directory.");
     }
 
     [Fact]
