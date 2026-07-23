@@ -49,7 +49,9 @@ The latest merged fix restores the original shared ownership model:
 - Windows keeps the DFU device until PongoOS enumerates as Apple USB **`05AC:4141`**.
 - Only after PongoOS exists does the app hand that device to WSL for palera1n continuation.
 - The corrected PowerShell parser and explicit Pongo continuation shim remain included.
-- Jailbreak, the non-destructive DFU/Pongo test, and Downgrade all use this same initial Windows-native pipeline.
+- Jailbreak and the non-destructive hardware test use the Windows-native Pongo launch path.
+- The destructive DarkSword SHC/restore/PTE stages stop earlier in verified `PWND:[yolo]` pwned DFU, matching the pinned turdus restore fork's required input mode.
+- PongoOS is not uploaded during SHC capture, firmware restore, or PTE generation; it is used again only for the Pongo half of the hardware test and final tether boot.
 
 Physical validation is still required.
 
@@ -98,6 +100,14 @@ The active IPSW verifier accepts **iOS/iPadOS 15.x only**. It checks:
 - Exact connected ProductType and ECID
 
 The current Windows SEP-block restore backend is enabled only for supported **A9-class DarkSword catalog targets**. The primary target is the iPad 5th generation (`iPad6,11` / `iPad6,12`). Broader jailbreak support does not mean broader downgrade support.
+
+For A9, **Start Downgrade** now enforces the original restore-state boundary before every destructive native operation:
+
+1. Run Windows-native checkm8 with `openra1n-core.exe --pwned-dfu-only`.
+2. Verify DFU remains `05AC:1227` and `irecovery -q` reports the exact turdus-compatible `PWND:[yolo]` marker.
+3. Only then run the requested `turdus_merula.exe` SHC, restore, or PTE operation.
+4. Abort before erasing if PongoOS appears early, the marker is missing, or ProductType/ECID changes.
+
 
 A successful downgrade session is designed to preserve device-bound artifacts including:
 
@@ -240,7 +250,7 @@ Important components include:
 |---|---|
 | `Palera1nWin.exe` | Main WPF application containing Jailbreak and the four-action DarkSword Downgrade interface |
 | `toolchain/openra1n.exe` | Shared Windows wrapper that launches the pinned native core and watches for PongoOS `05AC:4141` |
-| `toolchain/openra1n-core.exe` | Production Windows-native DFU/checkm8/PongoOS core used before any WSL handoff |
+| `toolchain/openra1n-core.exe` | Production Windows-native checkm8 core with separate verified pwned-DFU-only and PongoOS modes |
 | `toolchain/windows/palera1n.ps1` | Corrected Windows PowerShell/WSL launcher used for palera1n continuation |
 | `toolchain/palera1n.cmd` | Command wrapper for the PowerShell launcher |
 | `toolchain/dist/palera1n-linux-x86_64` | Pinned official palera1n Linux runtime |
