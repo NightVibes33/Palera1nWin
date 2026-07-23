@@ -24,6 +24,7 @@ public partial class MainWindow : FluentWindow
     ];
 
     private readonly PageService _pageService;
+    private bool _firstRunOnboardingScheduled;
 
     public MainWindow(MainViewModel viewModel, int? initialTab = null)
     {
@@ -40,6 +41,14 @@ public partial class MainWindow : FluentWindow
         {
             int tab = initialTab is int t && t >= 0 && t < TabPages.Length ? t : 0;
             NavigateToTab(tab);
+
+            if (!_firstRunOnboardingScheduled)
+            {
+                _firstRunOnboardingScheduled = true;
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ContextIdle,
+                    new Action(() => OnboardingWindow.ShowFirstRun(this)));
+            }
         };
 
         Closed += (_, _) =>
