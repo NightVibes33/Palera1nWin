@@ -1,213 +1,404 @@
-# Palera1nWin
+# Palera1nWin + DarkSword Restore
 
-Production-grade **Windows GUI** for [palera1n](https://github.com/palera1n/palera1n) — automated hybrid jailbreak (native `openra1n` checkm8 + WSL `palera1n` payloads) with a Fluent / Acrylic shell.
+Experimental Windows application that combines a **palera1n jailbreak workflow** with the **DarkSword iOS/iPadOS 15 tethered-downgrade workflow** in one WPF interface.
 
-> **Not an official palera1n product.** Official Windows path remains [palen1x](https://docs.palera.in/docs/get-started/installing-palen1x-windows/). This app packages the hybrid flow validated on Windows 11 + WSL2.
+The packaged application is named **DarkSword Restore**, while the main executable remains `Palera1nWin.exe`.
 
----
+> [!WARNING]
+> This project is under active development. The current source builds, tests, packages, and passes deterministic runtime smoke tests in GitHub Actions, but a green CI build does **not** prove that a physical device can complete checkm8, boot PongoOS, jailbreak, restore firmware, or tether-boot successfully.
+>
+> The current loader replacement still requires confirmation on the primary test device: **iPad 5th generation Wi-Fi (`iPad6,11`, A9) running iPadOS 16.7.11**.
 
-## Features
+> [!CAUTION]
+> **Downgrade erases the device.** Back up important data, save authenticator recovery codes, and know the Apple ID password associated with Activation Lock before approving an erase.
 
-- Fluent dark UI (WPF-UI 4.3, Acrylic backdrop, teal accent)
-- One-click jailbreak orchestrator: DFU helper → libusbK → openra1n (Pongo 2.6.3) → palera1n payloads
-- Device live monitor (Normal / Recovery / DFU / YOLO / Pongo)
-- Driver assist for `05AC:1227` / `1281` / `4141` (auto when possible, Zadig fallback)
-- **Fix Windows Drivers** — one-click restore of default Apple drivers after jailbreak (removes libusbK/WinUSB so iTunes/Apple Devices can see the phone again)
-- **UsbDk uninstall** — one-click removal of the conflicting UsbDk filter driver
-- Fetch / select palera1n versions from GitHub Releases
-- Settings: rootless/rootful, safe mode, verbose boot (`-V`), toolchain root, WSL distro
-- **Portable** — settings, logs, and runtime files live next to the exe (no `AppData` pollution)
-- Logs + Setup doctor checks (WSL, usbipd, toolchain, UsbDk conflict detection, WSL runtime)
-- **Bundled toolchain** — `openra1n.exe`, `palera1n.ps1` launcher, `palera1n-linux-x86_64` binary, `wdi-simple.exe`, `zadig.exe`, `gaster.exe`, and provision scripts ship in `toolchain\` next to the exe. No separate toolchain download required.
-- **One-click Provision WSL** — installs the `palera1n` runtime + `pln-run.sh` wrapper into `/opt/palera1n/` inside your WSL distro from the Setup tab (no manual `setup.ps1`).
+This is not an official palera1n, Apple, openra1n, libimobiledevice, usbipd-win, or turdus project.
 
 ---
 
-## Supported devices
+## Current development status
 
-Palera1nWin follows [palera1n's own device support](https://docs.palera.in/docs/reference/compatibility-chart/) exactly — it's per-model, not just per-chip, so not every device sharing a supported SoC is necessarily included (e.g. iPhone 6/6 Plus are A8 but are **not** on palera1n's supported list).
+| Area | Current status |
+|---|---|
+| Windows WPF application | Builds and launches in CI |
+| Managed tests | Passing |
+| Windows PowerShell launcher | Parsed and executed by packaged smoke tests |
+| Native Windows toolchain | Built from pinned source revisions |
+| Portable ZIP packaging | Passing manifest and SHA-256 verification |
+| Jailbreak on a physical device | **Not yet confirmed with the current build** |
+| PongoOS handoff on `iPad6,11` | **Requires a new physical test** |
+| Complete iOS 15 downgrade | **Not yet physically confirmed** |
+| Post-downgrade tethered cold boot | **Not yet physically confirmed** |
 
-| Chip | Devices | Status |
-|------|---------|--------|
-| **A11** | iPhone 8, iPhone 8 Plus, iPhone X | Supported (passcode must stay disabled) |
-| **A10 / A10X** | iPhone 7, iPhone 7 Plus, iPad (6th/7th gen), iPad Pro 10.5", iPad Pro 12.9" (2nd gen), iPod touch (7th gen), Apple TV 4K (1st gen) | Supported |
-| **A9 / A9X** | iPhone 6s, iPhone 6s Plus, iPhone SE (2016), iPad (5th gen), iPad Pro 9.7", iPad Pro 12.9" (1st gen) | Supported |
-| **A8 / A8X** | iPad mini 4, iPad Air 2, Apple TV HD | Supported |
-| A7 and earlier | iPhone 5s, iPad Air (1st gen), iPad mini 2/3, etc. | **Not supported** by palera1n |
-| A12 and newer | iPhone XS and newer | **Not supported** (checkm8 is A8–A11 only) |
+Earlier physical testing exposed two real defects:
 
-Apple T2-equipped Macs are also jailbreakable by palera1n, but use a separate restore-mode flow this GUI does not cover.
+1. The packaged `palera1n.ps1` file could fail Windows PowerShell parsing before palera1n started.
+2. The old production Pongo route mixed openra1n's legacy boot shellcode with a different palera1n Pongo image, allowing checkm8 and payload transfer to finish while the device returned to normal mode.
 
-> **A11 note:** On iPhone 8 / 8 Plus / X you **must** disable passcode & Touch ID before jailbreaking. On iOS 16+, you need to reset the device (and keep the passcode disabled) before proceeding — see [palera1n's compatibility chart](https://docs.palera.in/docs/reference/compatibility-chart/) for details.
-
----
-
-## Quick start (end users)
-
-### 1. Install prerequisites
-
-| Component | Why | Install |
-|-----------|-----|---------|
-| **WSL2 + Ubuntu** | Runs `palera1n` Linux payloads | `wsl --install -d Ubuntu` in an **admin** PowerShell, then reboot |
-| **usbipd-win** | Bridges the iPhone's USB to WSL | Download from [github.com/dorssel/usbipd-win/releases](https://github.com/dorssel/usbipd-win/releases) and install |
-| **Apple Mobile Device driver** | iTunes-style recovery/normal mode | Bundled with iTunes / Apple Devices (Microsoft Store) |
-| **Visual C++ Redistributable** | `openra1n.exe` runtime | [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
-
-### 2. Download Palera1nWin
-
-Grab the latest `Palera1nWin-win-x64.zip` from [Releases](../../releases). Unzip to any folder. **Run as Administrator** (right-click → Run as administrator) — this is required for driver installation and `usbipd` detach/attach.
-
-The release zip is self-contained: the `Palera1nWin.exe` and a `toolchain\` folder (with `openra1n.exe`, the WSL `palera1n` binary, launcher scripts, and driver tooling) ship together. No extra downloads.
-
-### 3. First-run setup
-
-1. Open the **Setup** tab. The app checks WSL, usbipd, the bundled toolchain, and the WSL `palera1n` runtime automatically.
-2. Click **Provision WSL** (one-time). This installs the `palera1n` binary + `pln-run.sh` wrapper into `/opt/palera1n/` inside your WSL distro and pulls the runtime packages (`usbmuxd`, `usbutils`, `libusb`, `usbip`). Accept the UAC prompt if it appears.
-3. Connect your iPhone via a **USB-A to Lightning** cable (USB-C adapters are unreliable for DFU).
-
-### 4. Jailbreak
-
-1. Open the **Jailbreak** tab.
-2. Click **Start Jailbreak**.
-3. When the **"Press Enter when ready for DFU mode"** dialog appears, follow the on-screen button sequence to enter DFU.
-4. The app handles the rest: installs `libusbK`, runs `openra1n` (checkm8 + PongoOS upload), bridges the device to WSL, and runs `palera1n` payloads.
-5. When you see **"Jailbreak flow completed"**, your device will respring with the jailbreak active.
+The current build replaces that production path with official palera1n's internally matched checkra1n/Pongo pair and adds an actual Windows PowerShell parser regression. Physical validation is still required.
 
 ---
 
-## How it works
+## Main workflows
 
+### Jailbreak
+
+Use **Jailbreak** to keep the currently installed firmware and run palera1n.
+
+Current flow:
+
+1. Validate the packaged runtime, WSL installation, USB state, and connected Apple device.
+2. Temporarily stop Apple Mobile Device Service when required.
+3. Guide the user into DFU with the synchronized device-bezel animation.
+4. Assign the required DFU USB driver and transfer the selected Apple USB device through `usbipd-win`.
+5. Start official palera1n's matched checkra1n/Pongo loader in WSL.
+6. Detect PongoOS as Apple USB `05AC:4141`.
+7. Continue with palera1n's jailbreak payload flow.
+8. Clean up USB ownership and restore services.
+
+Rootless is the recommended option. A full device reboot removes the active jailbreak state, so the Jailbreak workflow must be run again.
+
+### DarkSword downgrade
+
+Use **Downgrade** to erase the device and install a supported iOS/iPadOS 15 IPSW through the DarkSword restore backend.
+
+The visible Downgrade screen has four primary actions:
+
+| Action | Purpose |
+|---|---|
+| **Start Downgrade** | Select and validate an iOS/iPadOS 15 IPSW, bind the session to the detected ProductType and ECID, approve the erase, and run the restore workflow. |
+| **Test DFU → Pwned/Pongo** | Non-destructive hardware test for DFU detection, USB driver state, checkm8, PongoOS enumeration, and the Pongo bridge. |
+| **Boot Device** | Tether-boot an already downgraded device using its saved `boot-profile.json`. Required after a shutdown, restart, or dead battery. |
+| **Import Boot Profile** | Load a completed DarkSword `boot-profile.json` when automatic discovery does not find it. |
+
+The active IPSW verifier accepts **iOS/iPadOS 15.x only**. It checks:
+
+- ZIP structure and safe archive paths
+- `BuildManifest.plist` and `Restore.plist`
+- Product version and build version
+- Supported ProductType values
+- iBSS, iBEC, and SEP firmware presence
+- Full IPSW SHA-256
+- Exact connected ProductType and ECID
+
+The current Windows SEP-block restore backend is enabled only for supported **A9-class DarkSword catalog targets**. The primary target is the iPad 5th generation (`iPad6,11` / `iPad6,12`). Broader jailbreak support does not mean broader downgrade support.
+
+A successful downgrade session is designed to preserve device-bound artifacts including:
+
+- `boot-profile.json`
+- SHC block data
+- PTE block data
+- Restore-session metadata
+- IPSW identity and hash information
+
+Keep the complete session directory. Do not edit the ECID, ProductType, file paths, or hashes to bypass validation.
+
+### Tethered cold boot
+
+A DarkSword-downgraded installation is designed to be tethered. After any full shutdown, restart, or dead battery:
+
+1. Connect the exact downgraded device.
+2. Enter clean DFU.
+3. Open **Downgrade**.
+4. Import the correct `boot-profile.json` if it was not detected automatically.
+5. Press **Boot Device**.
+
+The app rechecks ProductType, ECID, profile integrity, PTE data, and required resources before sending the boot sequence.
+
+---
+
+## Guided DFU interface
+
+Both workflows use the same synchronized DFU guide.
+
+The guide includes:
+
+- A device bezel overlay with highlighted physical buttons
+- Device-specific button labels
+- A three-second preparation phase
+- An eight-second dual-button hold phase
+- A ten-second second-button hold phase
+- Stopwatch-based timing instead of accumulating one-second UI delays
+- A large countdown, progress indicator, and current-step instructions
+- Immediate completion when real DFU or PongoOS is detected
+- A warning that a correct DFU screen remains completely black
+- Cancel and retry handling
+
+For the iPad 5th generation, the guide uses the **Top + Home** sequence.
+
+---
+
+## Requirements
+
+### Host computer
+
+- Windows 11 x64
+- Administrator access
+- WSL2
+- Ubuntu or another supported Debian/Ubuntu WSL distribution
+- `usbipd-win`
+- Apple Mobile Device drivers from Apple Devices or iTunes
+- Windows PowerShell 5.1
+- A reliable direct USB data connection
+- Internet access for setup and firmware metadata
+- At least 20 GB free for downgrade work; larger IPSWs may require more
+
+The downgrade preflight calculates required storage as the greater of approximately **20 GB** or **2.5× the IPSW size plus 5 GB**.
+
+### Cable and USB guidance
+
+- Prefer a direct motherboard USB port.
+- Avoid hubs when troubleshooting DFU or PongoOS enumeration.
+- USB-A to Lightning is generally more reliable for checkm8-era devices than some USB-C adapters or hubs.
+- Disconnect every other Apple device before starting.
+- Close Zadig, gaster, other jailbreak tools, and separate `usbipd` terminals while the app owns the USB transaction.
+
+---
+
+## First-time setup
+
+1. Download and fully extract the current `DarkSword-Restore-win-x64` package.
+2. Do not overwrite an older extracted build. Use a new folder.
+3. Run `Palera1nWin.exe` as Administrator.
+4. Open **Setup**.
+5. Confirm WSL2, Ubuntu, `usbipd-win`, the bundled toolchain, and Apple drivers are detected.
+6. Press **Provision WSL**.
+7. Let the app install the packaged palera1n runtime and `pln-run.sh` under `/opt/palera1n/`.
+8. Connect only the target Apple device.
+
+Re-run **Provision WSL** after installing a build that changes the packaged palera1n runtime or launcher scripts.
+
+---
+
+## Recommended test order
+
+For the iPad 5 development target:
+
+1. Extract the latest build into a new folder.
+2. Run the app as Administrator.
+3. Provision WSL again.
+4. Enter clean DFU.
+5. Press **Test DFU → Pwned/Pongo** before attempting an erase.
+6. Confirm the log contains:
+
+```text
+[DarkSword] Starting official palera1n matched checkra1n/PongoOS loader
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐     ┌──────────────┐
-│  DFU helper  │────▶│  libusbK on   │────▶│   openra1n   │────▶│   PongoOS    │
-│ (palera1n -D)│     │  Windows host │     │  (checkm8)   │     │  (05AC:4141) │
-└─────────────┘     └──────────────┘     └─────────────┘     └──────┬───────┘
-                                                                        │
-                                                                        ▼
-┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────┐
-│  Device on  │◀────│  usbipd      │◀────│  palera1n (WSL)                  │
-│  PongoOS    │     │  attach to   │     │  Pongo payloads + rootless/fs   │
-│  libusbK    │     │  WSL         │     │  jailbreak                       │
-└─────────────┘     └──────────────┘     └─────────────────────────────────┘
-```
 
-1. **DFU helper** — `palera1n -D` in WSL guides the device into DFU mode (you do the button presses).
-2. **libusbK** — the app silently installs the `libusbK` driver on the DFU device (via `wdi-simple.exe`, bundled). No manual Zadig needed.
-3. **openra1n** — Windows-native `openra1n.exe` runs the checkm8 exploit and uploads PongoOS. A background watchdog keeps `libusbK` active.
-4. **usbipd bridge** — the PongoOS device is attached to WSL via `usbipd-win`.
-5. **palera1n payloads** — `palera1n` in WSL sends the rootless/rootful payloads over PongoOS.
-6. **Release** — the device is detached from WSL and returned to the Windows host.
+7. Confirm Windows detects PongoOS USB `05AC:4141`.
+8. Only after the non-destructive test passes should **Start Downgrade** be considered.
+
+If the log says `Starting Windows checkm8/PongoOS core`, an older build is running.
 
 ---
 
-## Troubleshooting
+## USB and driver behavior
 
-### "Device not recognized by iTunes / Apple Devices after jailbreak"
-After a jailbreak session, the Apple USB device may still be on the `libusbK` driver (installed for `openra1n`). To restore the default Apple driver:
-- Open the **Device** tab → click **Fix Windows Drivers**. This removes `libusbK`/`WinUSB` from all connected Apple devices and triggers a hardware re-scan so Windows re-installs the stock Apple driver. The device will briefly disconnect and reconnect.
+The app coordinates USB ownership instead of expecting the user to manually switch drivers throughout the workflow.
 
-### "openra1n exited with code -1073741819 (ACCESS_VIOLATION)"
-The DFU device was on the wrong driver (`VBoxUSB`/`WinUSB` instead of `libusbK`). The app auto-fixes this, but if it persists:
-- Close the app, open Zadig (bundled in `toolchain\dist\native\zadig.exe`), select `Apple Mobile USB (DFU)` → replace driver with `libusbK` → retry.
+Depending on device mode it may:
 
-### "PongoOS USB device never appeared"
-`openra1n` ran but PongoOS didn't enumerate. Usually a stale YOLO state:
-- Force-restart the iPhone (Volume Up → Volume Down → hold Side until Apple logo).
-- Re-enter DFU mode and click **Start Jailbreak** again.
+- Stop and later restore Apple Mobile Device Service
+- Verify or install `libusbK` for Apple DFU `05AC:1227`
+- Accept `libusbK` or WinUSB for PongoOS `05AC:4141`
+- Bind, attach, detach, or unbind the exact Apple USB bus through `usbipd-win`
+- Reject multiple connected Apple devices
+- Reject stale generic pwned-DFU states
+- Detect UsbDk conflicts
+- Return the selected bus to Windows after WSL operations
 
-### "Whoops, device did not enter DFU mode"
-The DFU button timing was off. The app continues if the device is actually in DFU, but if it genuinely failed:
-- Try again — DFU entry is timing-sensitive. Use a USB-A cable if possible.
-
-### "UsbDk filter is installed"
-UsbDk conflicts with `usbipd-win`. Uninstall it:
-- Settings → Apps → search "UsbDk" → Uninstall. Or use the app's **Setup** tab (offers one-click uninstall).
-
-### Device stuck in recovery mode (iTunes logo)
-- The app's **Device** tab has a "Exit Recovery" action. Or run `idevicerestore -e` if available.
-
-### "Waiting for devices" hangs (Shared but not Attached)
-Caused by UsbDk or stale `usbipd` state. The app kills leftover bridges and uses `bind --force`, but if it persists:
-- Close the app, run `usbipd list` in admin PowerShell, then `usbipd unbind --all` and retry.
-
-### Driver keeps flipping back to WinUSB
-Windows may race the driver assignment. The global watchdog re-applies `libusbK` automatically. If it keeps failing:
-- Disconnect other USB devices, use a direct motherboard USB port (no hub), and run the app as Administrator.
-
-### Logs
-Session logs are saved **next to the exe** in `logs\session-YYYYMMDD-HHmmss.log` (portable). Check the **Logs** tab in the app or open the latest file for troubleshooting.
+Use **Fix Windows Drivers** after testing if Apple Devices or iTunes no longer detects the device normally.
 
 ---
 
-## Build (developers)
+## Packaged components
+
+The portable package includes the managed application plus a `toolchain` directory containing the required launchers, binaries, resources, and verification manifests.
+
+Important components include:
+
+| Component | Role |
+|---|---|
+| `Palera1nWin.exe` | Main WPF application |
+| `toolchain/openra1n.exe` | Shared Windows entry point that starts official palera1n's matched Pongo loader in WSL and watches for `05AC:4141` |
+| `toolchain/openra1n-core.exe` | Legacy openra1n diagnostic binary; no longer the production Pongo boot path |
+| `toolchain/windows/palera1n.ps1` | Windows PowerShell/WSL launcher |
+| `toolchain/palera1n.cmd` | Command wrapper for the PowerShell launcher |
+| `toolchain/dist/palera1n-linux-x86_64` | Pinned official palera1n Linux runtime |
+| `toolchain/turdus_merula.exe` | Restore and SHC/PTE operations |
+| `toolchain/darksword-pongo.exe` | PongoOS probe and DarkSword boot commands |
+| `toolchain/wdi-simple.exe` | Automated USB-driver installation helper |
+| `toolchain/ideviceinfo.exe` | Normal-mode device identity queries |
+| `toolchain/irecovery.exe` | Recovery/DFU identity queries |
+| `toolchain/resources/sep_racer.bin` | SEP exploit resource used by the tethered restore plan |
+| `toolchain/resources/kpf.bin` | Kernel patchfinder resource |
+| `toolchain/native-build-manifest.txt` | Pinned native source and runtime metadata |
+| `toolchain/native-SHA256SUMS.txt` | Native-stage checksums |
+| `manifest.json` | Packaged-file sizes and SHA-256 values |
+
+---
+
+## Logs and support data
+
+Session logs are stored by the application and can be viewed from the Logs interface. A useful failure report should include:
+
+- Complete session log
+- App build number or artifact run
+- Windows version
+- WSL distribution
+- Device ProductType
+- Installed iOS/iPadOS version and build
+- USB cable/port type
+- Whether `05AC:1227` and `05AC:4141` appeared
+- Whether the device returned to Normal, Recovery, DFU, or PongoOS
+
+Remove Apple IDs, usernames, local paths, ECIDs, serial numbers, and other private identifiers before posting logs publicly. The project also includes redacted support-export services for DarkSword sessions.
+
+---
+
+## Common failures
+
+### PowerShell reports `Missing ')'` or `Unexpected token`
+
+That indicates an obsolete package containing the old broken launcher. Delete the entire extracted directory, extract a current package into a new folder, and provision WSL again.
+
+### Checkm8 succeeds but the device returns to normal mode
+
+This means exploit stages and payload transfer are not enough by themselves. PongoOS must enumerate as `05AC:4141`. Use the latest matched-loader build, a direct USB port, and the non-destructive DFU/Pongo test before attempting a downgrade.
+
+### PongoOS never appears
+
+- Force-reboot the device.
+- Re-enter clean DFU.
+- Confirm the screen is completely black.
+- Use a direct USB port and a known data cable.
+- Disconnect other Apple devices.
+- Re-run Setup and Provision WSL.
+- Verify `usbipd list` does not show a stale attachment.
+
+### Device is stuck in recovery
+
+Recovery mode is not DFU. Use the app's recovery-exit action or force-reboot, then enter DFU again.
+
+### Apple Devices or iTunes cannot see the device
+
+Use **Fix Windows Drivers** to remove the temporary libusbK/WinUSB assignment and restore the stock Apple driver.
+
+### UsbDk conflict
+
+UsbDk can conflict with `usbipd-win`. Remove UsbDk, reboot Windows, and retry.
+
+---
+
+## Building the managed application
+
+Install the .NET 8 and .NET 10 SDKs, then run:
 
 ```powershell
-git clone https://github.com/pwnapplehat/Palera1nWin.git
+git clone https://github.com/NightVibes33/Palera1nWin.git
 cd Palera1nWin
-dotnet build Palera1nWin.slnx -c Release
-dotnet test tests\Palera1nWin.Core.Tests -c Release
-dotnet run --project src\Palera1nWin.App -c Release
+
+dotnet restore src/Palera1nWin.App/Palera1nWin.App.csproj `
+  -r win-x64 `
+  -p:SelfContained=true
+
+dotnet build src/Palera1nWin.App/Palera1nWin.App.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -warnaserror
+
+dotnet test tests/Palera1nWin.Core.Tests/Palera1nWin.Core.Tests.csproj `
+  -c Release `
+  -warnaserror
+
+dotnet test DarkSwordRestore/tests/DarkSwordRestore.Core.Tests/DarkSwordRestore.Core.Tests.csproj `
+  -c Release `
+  -warnaserror
 ```
 
-Publish a self-contained single-file exe:
+Publish the self-contained Windows application with:
 
 ```powershell
-dotnet publish src\Palera1nWin.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist\win-x64
+dotnet publish src/Palera1nWin.App/Palera1nWin.App.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -p:PublishSingleFile=false `
+  -p:TreatWarningsAsErrors=true `
+  -o DarkSwordRestore/build/publish
 ```
 
-The `native\` folder (`wdi-simple.exe`, `zadig.exe`) is copied to the output automatically by the build target.
+The complete native Windows toolchain is built by `.github/workflows/darksword-restore-windows.yml` using pinned source revisions and MSYS2/MinGW64. The workflow then:
 
-To build a **release zip** (exe + bundled toolchain), publish to a clean folder then stage the toolchain:
+1. Builds and tests the managed application.
+2. Builds the native restore toolchain.
+3. Verifies required binaries and source pins.
+4. Creates the portable package.
+5. Runs the packaged-runtime smoke test.
+6. Generates manifest and SHA-256 data.
+7. Uploads the `DarkSword-Restore-win-x64` artifact.
 
-```powershell
-dotnet publish src\Palera1nWin.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-v100
-# Stage the runtime toolchain (openra1n, scripts, palera1n-linux binary, provision scripts)
-# into publish-v100\toolchain\ — see the bundle script in tools\.
-Compress-Archive -Path publish-v100\* -DestinationPath Palera1nWin-win-x64.zip -Force
-```
-
-### Architecture
-
-| Project | Role |
-|---------|------|
-| `Palera1nWin.App` | WPF GUI (Fluent / Acrylic, WPF-UI 4.3) |
-| `Palera1nWin.Core` | USB monitor, drivers, usbipd/WSL, openra1n, releases API, orchestrator |
-| `Palera1nWin.Core.Tests` | Unit tests |
-
-### Key components
-
-| File | Responsibility |
-|------|----------------|
-| `JailbreakOrchestrator.cs` | End-to-end flow: DFU → libusbK → openra1n → usbipd → palera1n |
-| `AppleUsbMonitor.cs` | Live USB device detection (Normal/Recovery/DFU/YOLO/Pongo) |
-| `DriverInstaller.cs` | `libusbK` install via `wdi-simple.exe`, driver service detection |
-| `LibusbKWatchdog.cs` | Background driver watchdog (re-applies `libusbK` if Windows flips it) |
-| `UsbipdService.cs` | `usbipd` list/bind/attach/detach/unbind, Apple device release |
-| `OpenRa1nService.cs` | `openra1n.exe` execution, PongoOS detection, stuck/hang detection |
-| `Elevation.cs` | UAC elevation for admin-only commands |
+Tagged public releases additionally require configured Windows Authenticode signing credentials.
 
 ---
 
-## Credits
+## Repository layout
 
-Palera1nWin is a front-end. The actual jailbreak is powered by these projects,
-whose binaries it **bundles and redistributes** under their own licenses (see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses/` folder):
+| Path | Purpose |
+|---|---|
+| `src/Palera1nWin.App` | WPF user interface, onboarding, setup, Jailbreak, Downgrade, and DFU guide |
+| `src/Palera1nWin.Core` | Jailbreak orchestration, USB monitoring, drivers, WSL, usbipd, process handling, and settings |
+| `DarkSwordRestore/src/DarkSwordRestore.Core` | IPSW inspection, exact identity binding, restore sessions, Pongo bridge, SHC/PTE flow, tether boot, and support exports |
+| `DarkSwordRestore/native` | Windows native wrappers and Pongo bridge sources |
+| `DarkSwordRestore/runtime/jailbreak` | Packaged palera1n launcher, WSL provisioner, and continuation shim |
+| `DarkSwordRestore/scripts` | Native build, packaging, patching, and smoke-test scripts |
+| `tests/Palera1nWin.Core.Tests` | Jailbreak/core and UI-source regression tests |
+| `DarkSwordRestore/tests/DarkSwordRestore.Core.Tests` | Restore-core tests |
+| `.github/workflows` | Managed validation and complete Windows artifact builds |
 
-- **[openra1n](https://github.com/mineek/openra1n)** by mineek — Windows checkm8 + PongoOS upload (Apache-2.0). Built from the [wh1te4ever/openra1n](https://github.com/wh1te4ever/openra1n) fork.
-- **[gaster](https://github.com/0x7ff/gaster)** by 0x7ff — checkm8 exploit, and the base openra1n builds on (Apache-2.0).
-- **[palera1n](https://github.com/palera1n/palera1n)** team — the Linux `palera1n` binary and PongoOS payloads (MIT).
-- **checkra1n team / PongoOS** — the checkm8 bootrom exploit and PongoOS pre-boot environment.
-- **[ra1npoc](https://github.com/kok3shidoll/ra1npoc)** by kok3shidoll — payloads embedded in openra1n.
-- **[libwdi](https://github.com/pbatard/libwdi) / [Zadig](https://zadig.akeo.ie/)** by Pete Batard — automated `libusbK` driver install (LGPL-3.0 / GPL-3.0).
-- **[libusb](https://github.com/libusb/libusb)** — USB access for openra1n/gaster (LGPL-2.1).
-- **[usbipd-win](https://github.com/dorssel/usbipd-win)** by Frans van Dorsselaer — USB/IP bridging to WSL.
-- UI patterns inspired by [BitBroom](https://github.com/pwnapplehat/BitBroom) (WPF-UI Acrylic).
+---
 
-## License
+## Safety and limitations
 
-Palera1nWin's own code is **MIT** — see [LICENSE](LICENSE).
+- This project cannot make an unsupported device vulnerable to checkm8.
+- A successful payload transfer is not the same as a successful PongoOS boot.
+- A successful PongoOS boot is not the same as a completed jailbreak or downgrade.
+- CI cannot emulate the exact physical Apple USB transition sequence.
+- Downgrade is destructive and should not be attempted until the non-destructive Pongo test succeeds.
+- The downgraded system is designed to require tethered boot support.
+- Do not disconnect the device during restore, SHC/PTE generation, or tether boot.
+- Do not bypass ECID, ProductType, IPSW, profile, or checksum validation.
+- Keep a current Apple-signed restore path available in case recovery is required.
 
-Bundled third-party binaries remain under their respective licenses (Apache-2.0,
-MIT, LGPL/GPL). Full texts are in [`licenses/`](licenses/) and the release archive.
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the complete attribution.
+---
+
+## Credits and licenses
+
+This project integrates or builds on work from:
+
+- [palera1n](https://github.com/palera1n/palera1n)
+- [openra1n](https://github.com/mineek/openra1n)
+- [libimobiledevice](https://github.com/libimobiledevice)
+- [usbipd-win](https://github.com/dorssel/usbipd-win)
+- [libusb](https://github.com/libusb/libusb)
+- [turdus-merula / idevicerestore work](https://github.com/turdus-m3rula)
+- checkm8, PongoOS, and related jailbreak-community research
+
+Third-party components remain under their respective licenses. Review `THIRD_PARTY_NOTICES.md`, the `licenses` directory, and the source repositories before redistribution.
+
+---
+
+## Contributing
+
+Useful contributions include:
+
+- Reproducible physical-device logs
+- USB transition traces for `05AC:1227` and `05AC:4141`
+- Windows/WSL compatibility fixes
+- Driver-state detection improvements
+- IPSW validation tests
+- Restore-session recovery tests
+- Documentation corrections that distinguish CI validation from physical-device validation
+
+Do not report a workflow as working unless the log proves the complete physical stage being claimed.
