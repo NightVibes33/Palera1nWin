@@ -10,6 +10,7 @@ using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Util;
 using Wpf.Ui.Appearance;
 using CorePackageIntegrityReport = Palera1nWin.Core.Security.PackageIntegrityReport;
+using CorePackageIntegrityVerifier = Palera1nWin.Core.Security.PackageIntegrityVerifier;
 
 namespace Palera1nWin.App;
 
@@ -31,7 +32,7 @@ public partial class App : Application
         CorePackageIntegrityReport integrity;
         try
         {
-            integrity = await new PackageIntegrityVerifier().VerifyAsync().ConfigureAwait(true);
+            integrity = await new CorePackageIntegrityVerifier().VerifyAsync().ConfigureAwait(true);
         }
         catch (Exception exception)
         {
