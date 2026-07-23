@@ -158,6 +158,9 @@ try {
         "RedactedSessionExportService",
         "DarkSwordBootProfile",
         "ValidateDfuToPongoAsync",
+        "DowngradeStagePlan",
+        "--pwned-dfu-only",
+        "PWND:[yolo]",
         "DarkSwordJailbroken"
     )) { Assert-BinaryString "DarkSwordRestore.Core.dll" $capability }
 
@@ -197,6 +200,16 @@ try {
     Assert-BinaryString "toolchain\openra1n.exe" "DFU remains owned by Windows"
     Assert-BinaryDoesNotContain "toolchain\openra1n.exe" "windows\palera1n.ps1"
     Assert-BinaryDoesNotContain "toolchain\openra1n.exe" "wdi-simple.exe"
+    Assert-BinaryString "toolchain\openra1n-core.exe" "--pwned-dfu-only"
+    Assert-BinaryString "toolchain\openra1n-core.exe" "PWND:[yolo]"
+    Assert-BinaryString "toolchain\openra1n-core.exe" "Pwned DFU ready"
+    Assert-BinaryDoesNotContain "toolchain\openra1n-core.exe" "YOLO:checkra1n"
+
+    $coreUsage = Invoke-CapturedProcess -FilePath (Join-Path $toolchain "openra1n-core.exe") -ArgumentList @("--invalid-smoke-option") -Name "openra1n-core-usage"
+    if ($coreUsage.ExitCode -eq 0 -or -not $coreUsage.Output.Contains("--pwned-dfu-only", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "openra1n-core.exe did not expose the separate pwned-DFU-only mode. Exit code: $($coreUsage.ExitCode)"
+    }
+    Write-Status "OK native pwned-DFU-only mode rejects invalid arguments before USB access"
 
     $nativeManifest = Get-Content (Join-Path $toolchain "native-build-manifest.txt") -Raw
     foreach ($token in @(
