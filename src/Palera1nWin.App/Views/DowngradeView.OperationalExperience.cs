@@ -18,6 +18,7 @@ public partial class DowngradeView
     private readonly ExperiencePreferencesStore _preferencesStore = new();
 
     private bool _operationalExperienceInitialized;
+    private bool _operationalInitializationQueued;
     private bool _operationalRunActive;
     private bool _windowCloseGuardWired;
     private DispatcherTimer? _operationalTimer;
@@ -46,12 +47,39 @@ public partial class DowngradeView
     private StackPanel _expertPanel = null!;
     private Button _exportButton = null!;
 
+    private bool OperationalDashboardControlsReady =>
+        _modeSelector is not null &&
+        _modeSummary is not null &&
+        _nextAction is not null &&
+        _nextActionButton is not null &&
+        _compatibility is not null &&
+        _compatibilityDetail is not null &&
+        _storage is not null &&
+        _storageDetail is not null &&
+        _cable is not null &&
+        _cableDetail is not null &&
+        _health is not null &&
+        _healthDetail is not null &&
+        _profile is not null &&
+        _profileDetail is not null &&
+        _power is not null &&
+        _failure is not null &&
+        _expertPanel is not null &&
+        _exportButton is not null;
+
+    private bool OperationalDashboardReady =>
+        _operationalExperienceInitialized && OperationalDashboardControlsReady;
+
     private void InitializeOperationalExperience()
     {
-        if (_operationalExperienceInitialized) return;
-        _operationalExperienceInitialized = true;
-        BuildOperationalPanel();
+        if (_operationalExperienceInitialized || _disposed) return;
+        if (!BuildOperationalPanel())
+        {
+            QueueOperationalInitializationRetry();
+            return;
+        }
 
+        _operationalExperienceInitialized = true;
         _monitor.DeviceChanged += Operational_DeviceChanged;
         IpswPathBox.TextChanged += Operational_TextChanged;
         FirmwareList.SelectionChanged += Operational_SelectionChanged;
@@ -72,9 +100,24 @@ public partial class DowngradeView
         RefreshOperationalDashboard();
     }
 
-    private void BuildOperationalPanel()
+    private void QueueOperationalInitializationRetry()
     {
-        if (Content is not ScrollViewer scroller || scroller.Content is not StackPanel root) return;
+        if (_operationalInitializationQueued || _disposed) return;
+        _operationalInitializationQueued = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() =>
+            {
+                _operationalInitializationQueued = false;
+                if (!_disposed && IsLoaded) InitializeOperationalExperience();
+            }));
+    }
+
+    private bool BuildOperationalPanel()
+    {
+        if (OperationalDashboardControlsReady) return true;
+        var root = FindOperationalRootPanel(Content as DependencyObject);
+        if (root is null) return false;
 
         var header = new TextBlock { Text = "OPERATIONAL SAFETY & HEALTH", Margin = new Thickness(0, 22, 0, 10) };
         if (TryFindResource("Text.Section") is Style style) header.Style = style;
@@ -186,6 +229,22 @@ public partial class DowngradeView
         var insert = Math.Max(0, root.Children.Count - 4);
         root.Children.Insert(insert, header);
         root.Children.Insert(insert + 1, card);
+        return OperationalDashboardControlsReady;
+    }
+
+    private static StackPanel? FindOperationalRootPanel(DependencyObject? node)
+    {
+        if (node is ScrollViewer { Content: StackPanel directRoot }) return directRoot;
+        if (node is null) return null;
+
+        foreach (var child in LogicalTreeHelper.GetChildren(node))
+        {
+            if (child is not DependencyObject dependency) continue;
+            var found = FindOperationalRootPanel(dependency);
+            if (found is not null) return found;
+        }
+
+        return null;
     }
 
     private Border StatusCard(string title, out TextBlock status, out TextBlock detail, int row, int column)
@@ -242,14 +301,14 @@ public partial class DowngradeView
     private async Task LoadModeAsync()
     {
         _uiMode = await _preferencesStore.LoadAsync();
-        if (!_operationalExperienceInitialized) return;
+        if (!OperationalDashboardReady) return;
         _modeSelector.SelectedItem = _uiMode;
         ApplyMode();
     }
 
     private async void ModeSelector_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_modeSelector.SelectedItem is not DowngradeUiMode mode) return;
+        if (!OperationalDashboardReady || _modeSelector.SelectedItem is not DowngradeUiMode mode) return;
         _uiMode = mode;
         ApplyMode();
         await _preferencesStore.SaveAsync(mode);
@@ -257,7 +316,7 @@ public partial class DowngradeView
 
     private void ApplyMode()
     {
-        if (!_operationalExperienceInitialized) return;
+        if (!OperationalDashboardReady) return;
         var expert = _uiMode == DowngradeUiMode.Expert;
         _expertPanel.Visibility = expert ? Visibility.Visible : Visibility.Collapsed;
         DiagnosticsBox.Visibility = expert ? Visibility.Visible : Visibility.Collapsed;
@@ -292,6 +351,8 @@ public partial class DowngradeView
     private void Operational_LogChanged(object sender, TextChangedEventArgs e)
     {
         _healthTracker.PulseLog();
+        if (!OperationalDashboardReady) return;
+
         var text = LogBox.Text;
         if (text.Length > 2400) text = text[^2400..];
         if (HasFailureSignal(text))
@@ -318,6 +379,7 @@ public partial class DowngradeView
 
     private void OperationalTimer_Tick(object? sender, EventArgs e)
     {
+        if (!OperationalDashboardReady) return;
         if (_busy && !_operationalRunActive) BeginProtection();
         if (!_busy && _operationalRunActive) EndProtection();
         _healthTracker.ObserveProgress(InferStage(), OperationProgress.Value);
@@ -361,7 +423,7 @@ public partial class DowngradeView
 
     private void RefreshOperationalDashboard()
     {
-        if (!_operationalExperienceInitialized) return;
+        if (!OperationalDashboardReady) return;
         var resources = Path.Combine(_tools.Root, "resources");
         var toolchainReady = _tools.MissingFiles().Count == 0 &&
                              File.Exists(Path.Combine(resources, "sep_racer.bin")) &&
@@ -388,7 +450,7 @@ public partial class DowngradeView
         catch (Exception exception)
         {
             _storage.Text = "Storage calculation failed";
-            _storage.Detail(exception.Message, ResourceBrush("Brush.Danger"));
+            _storageDetail.Detail(exception.Message, ResourceBrush("Brush.Danger"));
         }
 
         var cable = _cableTracker.GetSnapshot();
@@ -425,6 +487,7 @@ public partial class DowngradeView
 
     private void ConfigureNextAction()
     {
+        if (!OperationalDashboardReady) return;
         if (_busy)
         {
             _nextActionButton.Content = "Operation Active";
@@ -474,8 +537,10 @@ public partial class DowngradeView
 
     private async Task LoadKnownProfileAsync(AppleDeviceSnapshot snapshot)
     {
-        if (!_operationalExperienceInitialized) return;
+        if (!OperationalDashboardReady) return;
         await Task.Delay(500);
+        if (!OperationalDashboardReady || _disposed) return;
+
         var productType = DetectedProductType;
         var key = DeviceProfileStore.BuildKey(productType, snapshot.Ecid, snapshot.InstanceId);
         if (string.Equals(key, _lastProfileLookupKey, StringComparison.Ordinal)) return;
@@ -521,14 +586,20 @@ public partial class DowngradeView
             _activeDeviceProfile = profile;
             var export = await _exportService.ExportAsync(session, _logPath, profile, _cableTracker.GetSnapshot());
             _lastExportedSessionId = session.SessionId;
-            _profile.Text = "Profile and portable session ZIP saved";
-            _profileDetail.Text = export;
+            if (OperationalDashboardControlsReady)
+            {
+                _profile.Text = "Profile and portable session ZIP saved";
+                _profileDetail.Text = export;
+            }
             AppendLog($"Saved device profile and portable session export: {export}");
         }
         catch (Exception exception)
         {
-            _profile.Text = "Session export failed";
-            _profileDetail.Text = exception.Message;
+            if (OperationalDashboardControlsReady)
+            {
+                _profile.Text = "Session export failed";
+                _profileDetail.Text = exception.Message;
+            }
             AppendLog($"Session export failed: {exception}");
         }
     }
@@ -583,6 +654,7 @@ public partial class DowngradeView
 
     private void Operational_Unloaded(object sender, RoutedEventArgs e)
     {
+        _operationalInitializationQueued = false;
         if (!_operationalExperienceInitialized) return;
         _operationalExperienceInitialized = false;
         _monitor.DeviceChanged -= Operational_DeviceChanged;
