@@ -81,11 +81,8 @@ public partial class JailbreakView
         _detailedJailbreakDfuCts?.Dispose();
         _detailedJailbreakDfuCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var ownedCts = _detailedJailbreakDfuCts;
-        var token = ownedCts.Token;
         var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // This project is currently physically targeting iPad6,11/iPad6,12, which use
-        // the Home + Top/Power path in palera1n's native dfuhelper.
         var profile = DfuGuideButtonProfile.Home;
         _detailedJailbreakDfuOverlay.Open(profile);
         _ = RunNativePromptSequenceAsync(viewModel, profile, ready, ownedCts);
@@ -173,7 +170,7 @@ public partial class JailbreakView
         Content = root;
     }
 
-    private static void CorrectNativeTimingCopy(DependencyObject root)
+    internal static void CorrectNativeTimingCopy(DependencyObject root)
     {
         if (root is TextBlock { Text: "8-second hold" } text) text.Text = "4-second hold";
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
