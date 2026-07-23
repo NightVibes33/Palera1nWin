@@ -7,6 +7,13 @@
 #include <stdlib.h>
 #include <wchar.h>
 
+typedef enum {
+    APPLE_USB_NONE = 0,
+    APPLE_USB_DFU = 1,
+    APPLE_USB_PONGO = 2,
+    APPLE_USB_OTHER = 3
+} apple_usb_mode_t;
+
 static int sibling_path(const wchar_t *name, wchar_t *output, size_t capacity)
 {
     DWORD length = GetModuleFileNameW(NULL, output, (DWORD)capacity);
@@ -34,16 +41,16 @@ static int contains_case_insensitive(const wchar_t *text, const wchar_t *needle)
     return 0;
 }
 
-static int pongo_is_present(void)
+static apple_usb_mode_t detect_apple_usb_mode(void)
 {
     HDEVINFO info = SetupDiGetClassDevsW(
         &GUID_DEVINTERFACE_USB_DEVICE,
         NULL,
         NULL,
         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (info == INVALID_HANDLE_VALUE) return 0;
+    if (info == INVALID_HANDLE_VALUE) return APPLE_USB_NONE;
 
-    int found = 0;
+    apple_usb_mode_t best = APPLE_USB_NONE;
     for (DWORD index = 0; ; ++index) {
         SP_DEVICE_INTERFACE_DATA interface_data;
         ZeroMemory(&interface_data, sizeof(interface_data));
@@ -59,19 +66,24 @@ static int pongo_is_present(void)
         PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail = malloc(required);
         if (detail == NULL) break;
         detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
-        if (SetupDiGetDeviceInterfaceDetailW(info, &interface_data, detail, required, NULL, NULL)) {
-            if (contains_case_insensitive(detail->DevicePath, L"vid_05ac") &&
-                contains_case_insensitive(detail->DevicePath, L"pid_4141")) {
-                found = 1;
+        if (SetupDiGetDeviceInterfaceDetailW(info, &interface_data, detail, required, NULL, NULL) &&
+            contains_case_insensitive(detail->DevicePath, L"vid_05ac")) {
+            if (contains_case_insensitive(detail->DevicePath, L"pid_4141")) {
+                best = APPLE_USB_PONGO;
                 free(detail);
                 break;
+            }
+            if (contains_case_insensitive(detail->DevicePath, L"pid_1227")) {
+                if (best == APPLE_USB_NONE) best = APPLE_USB_DFU;
+            } else {
+                best = APPLE_USB_OTHER;
             }
         }
         free(detail);
     }
 
     SetupDiDestroyDeviceInfoList(info);
-    return found;
+    return best;
 }
 
 static wchar_t *build_command_line(int argc, wchar_t **argv, const wchar_t *core)
@@ -126,15 +138,18 @@ int wmain(int argc, wchar_t **argv)
     free(command);
 
     const DWORD total_timeout_ms = 120000;
-    const DWORD post_exit_grace_ms = 20000;
+    const DWORD post_exit_grace_ms = 30000;
     DWORD elapsed = 0;
     DWORD child_exit_elapsed = 0;
     DWORD child_exit_code = STILL_ACTIVE;
+    DWORD returned_mode_samples = 0;
     int child_exited = 0;
     int pongo_seen = 0;
+    int returned_to_apple_mode = 0;
 
     while (elapsed < total_timeout_ms) {
-        if (pongo_is_present()) {
+        apple_usb_mode_t mode = detect_apple_usb_mode();
+        if (mode == APPLE_USB_PONGO) {
             pongo_seen = 1;
             fwprintf(stdout, L"[DarkSword] PongoOS USB 05AC:4141 enumerated. Returning control to the managed driver/probe pipeline.\n");
             fflush(stdout);
@@ -152,6 +167,16 @@ int wmain(int argc, wchar_t **argv)
             fflush(stdout);
         }
 
+        if (child_exited && mode == APPLE_USB_OTHER) {
+            returned_mode_samples++;
+            if (returned_mode_samples >= 4) {
+                returned_to_apple_mode = 1;
+                break;
+            }
+        } else if (mode != APPLE_USB_OTHER) {
+            returned_mode_samples = 0;
+        }
+
         if (child_exited && child_exit_elapsed >= post_exit_grace_ms) break;
         Sleep(250);
         elapsed += 250;
@@ -166,6 +191,10 @@ int wmain(int argc, wchar_t **argv)
             WaitForSingleObject(process.hProcess, 3000);
         }
         exit_code = 0;
+    } else if (returned_to_apple_mode) {
+        fwprintf(stderr,
+            L"[DarkSword] The checkm8 transfer completed, but the device returned to normal/recovery Apple USB mode instead of PongoOS. The Pongo launch payload was rejected or crashed before 05AC:4141 enumeration.\n");
+        exit_code = 96;
     } else if (child_exited) {
         fwprintf(stderr,
             L"[DarkSword] openra1n-core.exe exited (code=%lu), and PongoOS did not enumerate during the %lu ms grace period.\n",
