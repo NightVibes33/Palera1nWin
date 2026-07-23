@@ -130,16 +130,26 @@ old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
 '''
-new_openra1n = '''python "$ROOT/scripts/patch-openra1n.py" openra1n.c
+new_openra1n = '''PALERA1N_PONGO_URL="https://cdn.nickchan.lol/palera1n/artifacts/kpf/iOS15/Pongo.bin"
+PALERA1N_PONGO="$BUILD/openra1n/payloads/Pongo.bin"
+PALERA1N_PONGO_SIZE="238104"
+PALERA1N_PONGO_SHA256="5475c5f701423858b34e92176c966a9d4b12950f38acb8d1c347f14d5b272655"
+curl --fail --location --retry 3 --retry-all-errors "$PALERA1N_PONGO_URL" --output "$PALERA1N_PONGO"
+PONGO_SIZE="$(wc -c < "$PALERA1N_PONGO" | tr -d ' ')"
+echo "palera1n-ios15-pongo-size=$PONGO_SIZE"
+echo "palera1n-ios15-pongo-sha256=$(sha256sum "$PALERA1N_PONGO" | awk '{print $1}')"
+[[ "$PONGO_SIZE" = "$PALERA1N_PONGO_SIZE" ]] || { echo "Unexpected official iOS 15 Pongo size: $PONGO_SIZE" >&2; exit 9; }
+printf '%s  %s\n' "$PALERA1N_PONGO_SHA256" "$PALERA1N_PONGO" | sha256sum --check -
+python "$ROOT/scripts/patch-openra1n.py" openra1n.c
 sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
 grep -q '^BIN = openra1n.exe$' Makefile
 make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
-gcc -std=c11 -O2 -Wall -Wextra -municode \
-  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \
-  -o "$STAGE/openra1n.exe" \
+gcc -std=c11 -O2 -Wall -Wextra -municode \\
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
+  -o "$STAGE/openra1n.exe" \\
   -lsetupapi
 '''
 if old_openra1n not in text:
@@ -185,7 +195,7 @@ if manifest_marker not in text:
     raise SystemExit("Could not locate native manifest")
 text = text.replace(
     manifest_marker,
-    manifest_marker + '\n  echo "palera1n-runtime-tag=v2.3"\n  echo "palera1n-runtime-sha256=037c2b398bc13bab277ae9abb841ae3c5c5bc89e22332bbcbcd8d04b68214292"',
+    manifest_marker + '\n  echo "palera1n-runtime-tag=v2.3"\n  echo "palera1n-runtime-sha256=037c2b398bc13bab277ae9abb841ae3c5c5bc89e22332bbcbcd8d04b68214292"\n  echo "palera1n-ios15-pongo-size=238104"\n  echo "palera1n-ios15-pongo-sha256=5475c5f701423858b34e92176c966a9d4b12950f38acb8d1c347f14d5b272655"',
     1,
 )
 text = text.replace(
