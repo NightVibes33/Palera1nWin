@@ -63,17 +63,22 @@ text = text.replace(
     'build_autotools "https://github.com/turdus-m3rula/libfragmentzip.git" 84e47176fee2d856c81f87f2caaa7aca2df679ae libfragmentzip',
     1,
 )
-old_idevice = '''git clone --depth 1 --branch sephaxx \
-  https://github.com/turdus-m3rula/idevicerestore_fork.git \
-  "$BUILD/idevicerestore"'''
+old_idevice = (
+    'git clone --depth 1 --branch sephaxx \\\n'
+    '  https://github.com/turdus-m3rula/idevicerestore_fork.git \\\n'
+    '  "$BUILD/idevicerestore"'
+)
 new_idevice = '''git clone --no-tags https://github.com/turdus-m3rula/idevicerestore_fork.git "$BUILD/idevicerestore"
 git -C "$BUILD/idevicerestore" checkout --detach c2ad454aecc3354f3b1a15dcb4d4b4dc0e83b743
 test "$(git -C "$BUILD/idevicerestore" rev-parse HEAD)" = c2ad454aecc3354f3b1a15dcb4d4b4dc0e83b743'''
 if old_idevice not in text:
     raise SystemExit("Could not pin idevicerestore")
 text = text.replace(old_idevice, new_idevice, 1)
+old_openra1n_clone = 'git clone --depth 1 https://github.com/mineek/openra1n.git "$BUILD/openra1n"'
+if old_openra1n_clone not in text:
+    raise SystemExit("Could not pin openra1n")
 text = text.replace(
-    'git clone --depth 1 https://github.com/mineek/openra1n.git "$BUILD/openra1n"',
+    old_openra1n_clone,
     'git clone --no-tags https://github.com/mineek/openra1n.git "$BUILD/openra1n"\n'
     'git -C "$BUILD/openra1n" checkout --detach 4595a5333e4134ade77b43fb2259e880b85801ee\n'
     'test "$(git -C "$BUILD/openra1n" rev-parse HEAD)" = 4595a5333e4134ade77b43fb2259e880b85801ee',
