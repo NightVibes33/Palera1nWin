@@ -17,7 +17,7 @@ function Quote-Bash([string]$Value) {
 
     # Bash represents one literal apostrophe inside single quotes as: '"'"'
     # Construct that sequence from characters so Windows PowerShell 5.1 never
-    # has to parse nested backslash/double-quote escaping.
+    # parses nested backslash/double-quote escaping.
     $apostrophe = [char]39
     $doubleQuote = [char]34
     $replacement = "$apostrophe$doubleQuote$apostrophe$doubleQuote$apostrophe"
@@ -26,8 +26,13 @@ function Quote-Bash([string]$Value) {
 
 function Convert-ToWslPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
-    if ($full -match '^([A-Za-z]):[\/](.*)$') {
-        return '/mnt/' + $Matches[1].ToLowerInvariant() + '/' + $Matches[2].Replace('\', '/')
+    if ($full.Length -ge 3 -and
+        [char]::IsLetter($full[0]) -and
+        $full[1] -eq ':' -and
+        ($full[2] -eq '\' -or $full[2] -eq '/')) {
+        $drive = [char]::ToLowerInvariant($full[0])
+        $rest = $full.Substring(3).Replace('\', '/')
+        return "/mnt/$drive/$rest"
     }
     throw "The runtime path must be on a local drive: $full"
 }
@@ -113,11 +118,21 @@ if ($selfTest) {
     if ($bytes.Length -lt 65536 -or $bytes[0] -ne 0x7F -or $bytes[1] -ne 0x45 -or $bytes[2] -ne 0x4C -or $bytes[3] -ne 0x46) {
         throw 'The packaged palera1n runtime is not a valid ELF executable.'
     }
+
     $quoteProbe = Quote-Bash "a'b"
-    if ($quoteProbe -ne "'a'`"'`"'b'") {
+    $apostrophe = ([char]39).ToString()
+    $doubleQuote = ([char]34).ToString()
+    $expectedQuote = $apostrophe + 'a' + $apostrophe + $doubleQuote + $apostrophe + $doubleQuote + $apostrophe + 'b' + $apostrophe
+    if ($quoteProbe -ne $expectedQuote) {
         throw "Bash quoting self-test failed: $quoteProbe"
     }
-    Write-Stage 'SELF-TEST OK: launcher parsed, Bash quoting passed, WSL provisioner, continuation shim, and Linux binary are packaged.'
+
+    $pathProbe = Convert-ToWslPath 'C:\Palera1nWin\runtime\test.sh'
+    if ($pathProbe -ne '/mnt/c/Palera1nWin/runtime/test.sh') {
+        throw "WSL path conversion self-test failed: $pathProbe"
+    }
+
+    Write-Stage 'SELF-TEST OK: launcher parsed, Bash quoting and WSL paths passed, continuation shim and Linux binary are packaged.'
     exit 0
 }
 
@@ -140,11 +155,9 @@ try {
     & wsl.exe -d $distro -u root -- test -x /opt/palera1n/pln-run.sh
     if ($LASTEXITCODE -ne 0) { throw "palera1n runtime is not provisioned in WSL '$distro'. Use Setup > Provision WSL." }
 
-    # The shared launcher has two intentional modes:
-    # 1. Clean DFU: official palera1n/checkra1n performs checkm8 and uploads its
-    #    internally matched Pongo image (for -p or a normal one-shot jailbreak).
-    # 2. Existing Pongo 05ac:4141: use the packaged no-op checkra1n shim so
-    #    palera1n continues with KPF/ramdisk/overlay instead of exploiting twice.
+    # Clean DFU uses official palera1n's internally matched checkra1n/Pongo pair.
+    # Existing Pongo 05ac:4141 uses the packaged no-op handoff helper so the
+    # full jailbreak continuation cannot trigger a second checkm8 run.
     $effectiveArgs = [Collections.Generic.List[string]]::new()
     foreach ($value in $palera1nArgs) { $effectiveArgs.Add($value) }
     if ($selected -and $selected.VidPid -eq '05ac:4141') {
