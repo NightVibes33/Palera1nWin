@@ -1,0 +1,27 @@
+name: Materialize Quick Actions UI fix
+
+on:
+  push:
+    branches:
+      - restore-darksword-quick-actions-ui
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: restore-darksword-quick-actions-ui
+          fetch-depth: 0
+      - run: python3 DarkSwordRestore/scripts/materialize-quick-actions-ui-fix.py
+      - shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/Palera1nWin.App/Views/DowngradeView.xaml.cs
+          git commit -m "Restore DarkSword Quick Actions as active downgrade layout"
+          git push origin HEAD:restore-darksword-quick-actions-ui
