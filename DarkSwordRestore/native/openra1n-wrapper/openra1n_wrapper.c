@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
+#include <wctype.h>
 
 typedef enum {
     APPLE_USB_NONE = 0,
@@ -27,6 +28,20 @@ static int sibling_path(const wchar_t *name, wchar_t *output, size_t capacity)
     if (wcslen(output) + wcslen(name) + 1 > capacity) return 0;
     wcscat(output, name);
     return 1;
+}
+
+static int powershell_path(wchar_t *output, size_t capacity)
+{
+    wchar_t windows_directory[MAX_PATH];
+    DWORD length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return 0;
+
+    int written = swprintf(
+        output,
+        capacity,
+        L"%ls\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        windows_directory);
+    return written > 0 && (size_t)written < capacity;
 }
 
 static int contains_case_insensitive(const wchar_t *text, const wchar_t *needle)
@@ -86,38 +101,73 @@ static apple_usb_mode_t detect_apple_usb_mode(void)
     return best;
 }
 
-static wchar_t *build_command_line(int argc, wchar_t **argv, const wchar_t *core)
+static int valid_distro_name(const wchar_t *value)
 {
-    size_t capacity = wcslen(core) + 4;
-    for (int index = 1; index < argc; ++index) capacity += wcslen(argv[index]) * 2 + 4;
+    if (value == NULL || *value == L'\0') return 0;
+    for (const wchar_t *cursor = value; *cursor != L'\0'; ++cursor) {
+        if (!(iswalnum(*cursor) || *cursor == L'.' || *cursor == L'_' || *cursor == L'-')) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
+static int resolve_distro(wchar_t *output, size_t capacity)
+{
+    DWORD length = GetEnvironmentVariableW(L"PALERA1NWIN_DISTRO", output, (DWORD)capacity);
+    if (length == 0) {
+        if (capacity < 8) return 0;
+        wcscpy(output, L"Ubuntu");
+        return 1;
+    }
+    if (length >= capacity || !valid_distro_name(output)) return 0;
+    return 1;
+}
+
+static wchar_t *build_command_line(
+    const wchar_t *powershell,
+    const wchar_t *script,
+    const wchar_t *distro)
+{
+    const wchar_t *format =
+        L"\"%ls\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass "
+        L"-File \"%ls\" -- -p -S --yes --distro \"%ls\"";
+    size_t capacity = wcslen(format) + wcslen(powershell) + wcslen(script) + wcslen(distro) + 32;
     wchar_t *command = calloc(capacity, sizeof(wchar_t));
     if (command == NULL) return NULL;
-    swprintf(command, capacity, L"\"%ls\"", core);
-    for (int index = 1; index < argc; ++index) {
-        wcscat(command, L" \"");
-        wcscat(command, argv[index]);
-        wcscat(command, L"\"");
+    if (swprintf(command, capacity, format, powershell, script, distro) < 0) {
+        free(command);
+        return NULL;
     }
     return command;
 }
 
-int wmain(int argc, wchar_t **argv)
+int wmain(void)
 {
-    wchar_t core[MAX_PATH];
-    if (!sibling_path(L"openra1n-core.exe", core, MAX_PATH)) {
-        fwprintf(stderr, L"[DarkSword] Could not resolve openra1n-core.exe.\n");
+    wchar_t script[MAX_PATH];
+    wchar_t legacy_core[MAX_PATH];
+    wchar_t powershell[MAX_PATH];
+    wchar_t distro[128];
+
+    if (!sibling_path(L"windows\\palera1n.ps1", script, MAX_PATH) ||
+        GetFileAttributesW(script) == INVALID_FILE_ATTRIBUTES) {
+        fwprintf(stderr, L"[DarkSword] Missing packaged windows\\palera1n.ps1 launcher.\n");
         return 90;
     }
-    if (GetFileAttributesW(core) == INVALID_FILE_ATTRIBUTES) {
-        fwprintf(stderr, L"[DarkSword] Missing %ls\n", core);
+    if (!powershell_path(powershell, MAX_PATH) ||
+        GetFileAttributesW(powershell) == INVALID_FILE_ATTRIBUTES) {
+        fwprintf(stderr, L"[DarkSword] Windows PowerShell 5.1 was not found.\n");
         return 91;
     }
-
-    wchar_t *command = build_command_line(argc, argv, core);
-    if (command == NULL) {
-        fwprintf(stderr, L"[DarkSword] Out of memory.\n");
+    if (!resolve_distro(distro, sizeof(distro) / sizeof(distro[0]))) {
+        fwprintf(stderr, L"[DarkSword] PALERA1NWIN_DISTRO contains an invalid WSL distribution name.\n");
         return 92;
+    }
+
+    wchar_t *command = build_command_line(powershell, script, distro);
+    if (command == NULL) {
+        fwprintf(stderr, L"[DarkSword] Could not build the official Pongo loader command line.\n");
+        return 93;
     }
 
     STARTUPINFOW startup;
@@ -126,19 +176,26 @@ int wmain(int argc, wchar_t **argv)
     ZeroMemory(&process, sizeof(process));
     startup.cb = sizeof(startup);
 
-    fwprintf(stdout, L"[DarkSword] Starting Windows checkm8/PongoOS core. USB drivers remain managed by the host application.\n");
+    fwprintf(stdout,
+        L"[DarkSword] Starting official palera1n matched checkra1n/PongoOS loader in WSL '%ls'. USB drivers remain managed by the host application.\n",
+        distro);
+    if (sibling_path(L"openra1n-core.exe", legacy_core, MAX_PATH) &&
+        GetFileAttributesW(legacy_core) != INVALID_FILE_ATTRIBUTES) {
+        fwprintf(stdout,
+            L"[DarkSword] openra1n-core.exe remains packaged only for diagnostics; the production Pongo boot no longer mixes its legacy shellcode with a different Pongo image.\n");
+    }
     fflush(stdout);
 
-    if (!CreateProcessW(core, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) {
+    if (!CreateProcessW(powershell, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) {
         DWORD error = GetLastError();
         free(command);
-        fwprintf(stderr, L"[DarkSword] Could not start openra1n-core.exe (error=%lu).\n", error);
-        return 93;
+        fwprintf(stderr, L"[DarkSword] Could not start the official palera1n Pongo loader (error=%lu).\n", error);
+        return 94;
     }
     free(command);
 
-    const DWORD total_timeout_ms = 120000;
-    const DWORD post_exit_grace_ms = 30000;
+    const DWORD total_timeout_ms = 240000;
+    const DWORD post_exit_grace_ms = 60000;
     DWORD elapsed = 0;
     DWORD child_exit_elapsed = 0;
     DWORD child_exit_code = STILL_ACTIVE;
@@ -149,11 +206,11 @@ int wmain(int argc, wchar_t **argv)
 
     while (elapsed < total_timeout_ms) {
         apple_usb_mode_t mode = detect_apple_usb_mode();
-        if (mode == APPLE_USB_PONGO) {
+        if (mode == APPLE_USB_PONGO && !pongo_seen) {
             pongo_seen = 1;
-            fwprintf(stdout, L"[DarkSword] PongoOS USB 05AC:4141 enumerated. Returning control to the managed driver/probe pipeline.\n");
+            fwprintf(stdout,
+                L"[DarkSword] PongoOS USB 05AC:4141 enumerated from the official matched loader. Returning control to the managed driver/probe pipeline.\n");
             fflush(stdout);
-            break;
         }
 
         if (!child_exited && WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) {
@@ -161,11 +218,13 @@ int wmain(int argc, wchar_t **argv)
             GetExitCodeProcess(process.hProcess, &child_exit_code);
             child_exit_elapsed = 0;
             fwprintf(stdout,
-                L"[DarkSword] openra1n-core.exe exited with code %lu after the USB payload stage; allowing %lu ms for PongoOS re-enumeration.\n",
+                L"[DarkSword] Official palera1n Pongo loader exited with code %lu; allowing %lu ms for Windows USB re-enumeration.\n",
                 child_exit_code,
                 post_exit_grace_ms);
             fflush(stdout);
         }
+
+        if (child_exited && pongo_seen) break;
 
         if (child_exited && mode == APPLE_USB_OTHER) {
             returned_mode_samples++;
@@ -184,30 +243,34 @@ int wmain(int argc, wchar_t **argv)
     }
 
     DWORD exit_code = 1;
-    if (pongo_seen) {
-        Sleep(500);
-        if (WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT) {
-            TerminateProcess(process.hProcess, 0);
-            WaitForSingleObject(process.hProcess, 3000);
-        }
+    if (pongo_seen && child_exit_code == 0) {
         exit_code = 0;
+    } else if (pongo_seen && child_exited) {
+        fwprintf(stderr,
+            L"[DarkSword] PongoOS enumerated, but the official loader exited with code %lu.\n",
+            child_exit_code);
+        exit_code = child_exit_code;
     } else if (returned_to_apple_mode) {
         fwprintf(stderr,
-            L"[DarkSword] The checkm8 transfer completed, but the device returned to normal/recovery Apple USB mode instead of PongoOS. The Pongo launch payload was rejected or crashed before 05AC:4141 enumeration.\n");
+            L"[DarkSword] Official palera1n completed the DFU attempt, but the device returned to normal/recovery mode instead of PongoOS.\n");
         exit_code = 96;
     } else if (child_exited) {
         fwprintf(stderr,
-            L"[DarkSword] openra1n-core.exe exited (code=%lu), and PongoOS did not enumerate during the %lu ms grace period.\n",
+            L"[DarkSword] Official palera1n loader exited (code=%lu), and PongoOS USB 05AC:4141 did not enumerate during the %lu ms grace period.\n",
             child_exit_code,
             post_exit_grace_ms);
         exit_code = child_exit_code == 0 ? 95 : child_exit_code;
     } else {
-        fwprintf(stderr, L"[DarkSword] Timed out waiting for PongoOS USB 05AC:4141.\n");
-        TerminateProcess(process.hProcess, 94);
+        fwprintf(stderr, L"[DarkSword] Timed out waiting for the official palera1n PongoOS handoff.\n");
+        TerminateProcess(process.hProcess, 97);
         WaitForSingleObject(process.hProcess, 3000);
-        exit_code = 94;
+        exit_code = 97;
     }
 
+    if (!child_exited && WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT) {
+        TerminateProcess(process.hProcess, exit_code);
+        WaitForSingleObject(process.hProcess, 3000);
+    }
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     return (int)exit_code;
