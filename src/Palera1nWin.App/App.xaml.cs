@@ -1,7 +1,9 @@
 ﻿using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using Palera1nWin.App.ViewModels;
+using Palera1nWin.App.Views;
 using Palera1nWin.Core.Security;
 using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Util;
@@ -20,6 +22,9 @@ public partial class App : Application
     {
         var selfTest = e.Args.Any(argument =>
             string.Equals(argument, "--self-test", StringComparison.OrdinalIgnoreCase));
+        var downgradeUiSelfTest = e.Args.Any(argument =>
+            string.Equals(argument, "--downgrade-ui-self-test", StringComparison.OrdinalIgnoreCase));
+        var anySelfTest = selfTest || downgradeUiSelfTest;
 
         PackageIntegrityReport integrity;
         try
@@ -29,7 +34,7 @@ public partial class App : Application
         catch (Exception exception)
         {
             WriteCrashLog(exception);
-            if (!selfTest)
+            if (!anySelfTest)
             {
                 MessageBox.Show(
                     $"Package integrity verification failed before startup:\n\n{exception.Message}",
@@ -44,7 +49,7 @@ public partial class App : Application
         if (!integrity.IsValid)
         {
             WriteIntegrityFailure(integrity);
-            if (!selfTest)
+            if (!anySelfTest)
             {
                 MessageBox.Show(
                     "Palera1nWin refused to start because packaged files were changed, removed, or added outside the tested release.\n\n" +
@@ -76,6 +81,14 @@ public partial class App : Application
             }
             catch { }
             Shutdown(validToolchain ? 0 : 93);
+            return;
+        }
+
+        if (downgradeUiSelfTest)
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var exitCode = await RunDowngradeUiSelfTestAsync().ConfigureAwait(true);
+            Shutdown(exitCode);
             return;
         }
 
@@ -114,6 +127,71 @@ public partial class App : Application
         var window = new MainWindow(_mainViewModel, initialTab);
         MainWindow = window;
         window.Show();
+    }
+
+    private async Task<int> RunDowngradeUiSelfTestAsync()
+    {
+        var resultPath = Path.Combine(AppContext.BaseDirectory, "downgrade-ui-self-test-result.txt");
+        Exception? dispatcherFailure = null;
+        DispatcherUnhandledExceptionEventHandler handler = (_, args) =>
+        {
+            dispatcherFailure = args.Exception;
+            args.Handled = true;
+        };
+        DispatcherUnhandledException += handler;
+
+        DowngradeView? view = null;
+        Window? host = null;
+        try
+        {
+            ApplicationAccentColorManager.Apply(
+                System.Windows.Media.Color.FromRgb(0x2D, 0xD4, 0xBF),
+                ApplicationTheme.Dark);
+
+            view = new DowngradeView();
+            host = new Window
+            {
+                Content = view,
+                Width = 1100,
+                Height = 800,
+                Left = -20000,
+                Top = -20000,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+            };
+            host.Show();
+
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+            await Task.Delay(TimeSpan.FromSeconds(2.3)).ConfigureAwait(true);
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+
+            if (dispatcherFailure is not null) throw new InvalidOperationException(
+                "The Downgrade tab raised an unhandled dispatcher exception during Loaded/log/timer processing.",
+                dispatcherFailure);
+
+            foreach (var fieldName in new[] { "_compatibility", "_failure", "_nextAction", "_exportButton" })
+            {
+                var field = typeof(DowngradeView).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field?.GetValue(view) is null)
+                    throw new InvalidOperationException($"Downgrade operational control {fieldName} was not initialized.");
+            }
+
+            File.WriteAllText(resultPath, "PASS: Downgrade tab Loaded, log, timer, and operational dashboard initialization completed.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception);
+            try { File.WriteAllText(resultPath, "FAIL: " + exception); } catch { }
+            return 94;
+        }
+        finally
+        {
+            DispatcherUnhandledException -= handler;
+            try { host?.Close(); } catch { }
+            try { view?.Dispose(); } catch { }
+        }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
