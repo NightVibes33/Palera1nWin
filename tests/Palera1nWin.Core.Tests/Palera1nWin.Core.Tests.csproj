@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
@@ -16,5 +17,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Palera1nWin.Core\Palera1nWin.Core.csproj" />
+    <ProjectReference Include="..\..\src\Palera1nWin.App\Palera1nWin.App.csproj" />
   </ItemGroup>
 </Project>
