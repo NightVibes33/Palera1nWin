@@ -22,7 +22,7 @@ public sealed class Palera1nLauncherSourceTests
     }
 
     [Fact]
-    public void LauncherUsesMatchedPongoAndExplicitContinuationShim()
+    public void LauncherKeepsWindowsOpenra1nAndExplicitPongoContinuationSeparate()
     {
         var root = RepositoryRoot();
         var launcher = File.ReadAllText(
@@ -36,10 +36,11 @@ public sealed class Palera1nLauncherSourceTests
         Assert.Contains("--override-checkra1n", launcher, StringComparison.Ordinal);
         Assert.Contains("/opt/palera1n/checkra1n", launcher, StringComparison.Ordinal);
         Assert.Contains("05ac:4141", launcher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("-p -S --yes", wrapper, StringComparison.Ordinal);
-        Assert.Contains("windows\\\\palera1n.ps1", wrapper, StringComparison.Ordinal);
-        Assert.Contains("official palera1n matched checkra1n/PongoOS loader", wrapper, StringComparison.Ordinal);
-        Assert.Contains("openra1n-core.exe remains packaged only for diagnostics", wrapper, StringComparison.Ordinal);
+        Assert.Contains("openra1n-core.exe", wrapper, StringComparison.Ordinal);
+        Assert.Contains("Windows-native openra1n", wrapper, StringComparison.Ordinal);
+        Assert.Contains("DFU remains owned by Windows", wrapper, StringComparison.Ordinal);
+        Assert.DoesNotContain("-p -S --yes", wrapper, StringComparison.Ordinal);
+        Assert.DoesNotContain("windows\\\\palera1n.ps1", wrapper, StringComparison.Ordinal);
     }
 
     [Fact]
