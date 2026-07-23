@@ -9,6 +9,7 @@ using Palera1nWin.Core.Security;
 using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Util;
 using Wpf.Ui.Appearance;
+using CorePackageIntegrityReport = Palera1nWin.Core.Security.PackageIntegrityReport;
 
 namespace Palera1nWin.App;
 
@@ -27,7 +28,7 @@ public partial class App : Application
             string.Equals(argument, "--downgrade-ui-self-test", StringComparison.OrdinalIgnoreCase));
         var anySelfTest = selfTest || downgradeUiSelfTest;
 
-        PackageIntegrityReport integrity;
+        CorePackageIntegrityReport integrity;
         try
         {
             integrity = await new PackageIntegrityVerifier().VerifyAsync().ConfigureAwait(true);
@@ -246,7 +247,7 @@ public partial class App : Application
         if (e.ExceptionObject is Exception exception) WriteCrashLog(exception);
     }
 
-    private static void WriteIntegrityFailure(PackageIntegrityReport report)
+    private static void WriteIntegrityFailure(CorePackageIntegrityReport report)
     {
         try
         {
