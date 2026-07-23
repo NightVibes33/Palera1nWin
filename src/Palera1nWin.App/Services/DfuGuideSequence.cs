@@ -191,7 +191,10 @@ public static class DfuGuideSequence
                 phase.VolumeDownButtonActive));
 
             var remainingTick = phase.Duration - clock.Elapsed;
-            await Task.Delay(remainingTick < UiTick ? remainingTick : UiTick, cancellationToken).ConfigureAwait(true);
+            if (remainingTick > TimeSpan.Zero)
+            {
+                await Task.Delay(remainingTick < UiTick ? remainingTick : UiTick, cancellationToken).ConfigureAwait(true);
+            }
         }
 
         present(new DfuGuideFrame(
