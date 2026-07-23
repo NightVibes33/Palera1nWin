@@ -1,0 +1,1 @@
+Programmatic UI surfaces must use Brush.Card/Brush.SurfaceSecondary, Brush.Border, and Brush.Text resources or call ProgrammaticTheme.ApplyCard. Do not rely on the default TextBlock foreground inside code-built dark cards.
