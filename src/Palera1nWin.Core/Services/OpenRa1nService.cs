@@ -20,9 +20,11 @@ public sealed class OpenRa1nService : IDisposable
     {
         _monitor = monitor ?? new AppleUsbMonitor();
         _ownsMonitor = monitor is null;
-        _pongoTimeout = pongoTimeout ?? TimeSpan.FromMinutes(3);
-        _postUploadGrace = postUploadGrace ?? TimeSpan.FromSeconds(45);
-        _stuckTimeout = stuckTimeout ?? TimeSpan.FromSeconds(60);
+        // The native wrapper allows 210 seconds total and a 75-second post-exit USB grace.
+        // Keep the managed owner outside that window so it never kills a valid late Pongo re-enumeration.
+        _pongoTimeout = pongoTimeout ?? TimeSpan.FromMinutes(4);
+        _postUploadGrace = postUploadGrace ?? TimeSpan.FromSeconds(75);
+        _stuckTimeout = stuckTimeout ?? TimeSpan.FromSeconds(150);
     }
 
     public event EventHandler<LogLine>? LogReceived;
@@ -128,7 +130,7 @@ public sealed class OpenRa1nService : IDisposable
             }
         }
 
-        Emit("openra1n", "PongoOS USB device was not detected after openra1n.", true);
+        Emit("openra1n", "PongoOS USB device was not detected after the complete native and managed grace windows.", true);
         return false;
     }
 
