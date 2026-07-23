@@ -41,6 +41,16 @@ static int contains_case_insensitive(const wchar_t *text, const wchar_t *needle)
     return 0;
 }
 
+static const wchar_t *apple_usb_mode_name(apple_usb_mode_t mode)
+{
+    switch (mode) {
+        case APPLE_USB_DFU: return L"DFU 05AC:1227";
+        case APPLE_USB_PONGO: return L"PongoOS 05AC:4141";
+        case APPLE_USB_OTHER: return L"normal/recovery Apple USB";
+        default: return L"disconnected";
+    }
+}
+
 static apple_usb_mode_t detect_apple_usb_mode(void)
 {
     HDEVINFO info = SetupDiGetClassDevsW(
@@ -74,8 +84,10 @@ static apple_usb_mode_t detect_apple_usb_mode(void)
                 break;
             }
             if (contains_case_insensitive(detail->DevicePath, L"pid_1227")) {
-                if (best == APPLE_USB_NONE) best = APPLE_USB_DFU;
-            } else {
+                // DFU outranks stale/composite normal interfaces. Do not let a later Apple
+                // child interface overwrite a real DFU observation.
+                best = APPLE_USB_DFU;
+            } else if (best == APPLE_USB_NONE) {
                 best = APPLE_USB_OTHER;
             }
         }
@@ -137,18 +149,24 @@ int wmain(int argc, wchar_t **argv)
     }
     free(command);
 
-    const DWORD total_timeout_ms = 120000;
-    const DWORD post_exit_grace_ms = 30000;
+    const DWORD total_timeout_ms = 210000;
+    const DWORD post_exit_grace_ms = 75000;
     DWORD elapsed = 0;
     DWORD child_exit_elapsed = 0;
     DWORD child_exit_code = STILL_ACTIVE;
-    DWORD returned_mode_samples = 0;
     int child_exited = 0;
     int pongo_seen = 0;
-    int returned_to_apple_mode = 0;
+    int saw_returned_apple_mode = 0;
+    apple_usb_mode_t last_mode = (apple_usb_mode_t)-1;
 
     while (elapsed < total_timeout_ms) {
         apple_usb_mode_t mode = detect_apple_usb_mode();
+        if (mode != last_mode) {
+            fwprintf(stdout, L"[DarkSword] USB state: %ls.\n", apple_usb_mode_name(mode));
+            fflush(stdout);
+            last_mode = mode;
+        }
+
         if (mode == APPLE_USB_PONGO) {
             pongo_seen = 1;
             fwprintf(stdout, L"[DarkSword] PongoOS USB 05AC:4141 enumerated. Returning control to the managed Windows-to-WSL handoff.\n");
@@ -167,14 +185,10 @@ int wmain(int argc, wchar_t **argv)
             fflush(stdout);
         }
 
+        // Normal/recovery can appear briefly between DFU and Pongo. Record it for the final
+        // diagnostic, but never abort after a few samples; wait the entire grace window.
         if (child_exited && mode == APPLE_USB_OTHER) {
-            returned_mode_samples++;
-            if (returned_mode_samples >= 4) {
-                returned_to_apple_mode = 1;
-                break;
-            }
-        } else if (mode != APPLE_USB_OTHER) {
-            returned_mode_samples = 0;
+            saw_returned_apple_mode = 1;
         }
 
         if (child_exited && child_exit_elapsed >= post_exit_grace_ms) break;
@@ -191,13 +205,14 @@ int wmain(int argc, wchar_t **argv)
             WaitForSingleObject(process.hProcess, 3000);
         }
         exit_code = 0;
-    } else if (returned_to_apple_mode) {
+    } else if (child_exited && saw_returned_apple_mode) {
         fwprintf(stderr,
-            L"[DarkSword] The checkm8 transfer completed, but the device returned to normal/recovery Apple USB mode instead of PongoOS. The embedded openra1n payload did not remain running.\n");
+            L"[DarkSword] The checkm8 transfer completed, but the device remained in normal/recovery Apple USB mode for the full %lu ms PongoOS grace period.\n",
+            post_exit_grace_ms);
         exit_code = 96;
     } else if (child_exited) {
         fwprintf(stderr,
-            L"[DarkSword] openra1n-core.exe exited (code=%lu), and PongoOS did not enumerate during the %lu ms grace period.\n",
+            L"[DarkSword] openra1n-core.exe exited (code=%lu), and PongoOS did not enumerate during the full %lu ms grace period.\n",
             child_exit_code,
             post_exit_grace_ms);
         exit_code = child_exit_code == 0 ? 95 : child_exit_code;
