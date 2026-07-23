@@ -1,4 +1,6 @@
+using Palera1nWin.Core.Drivers;
 using Palera1nWin.Core.Models;
+using Palera1nWin.Core.Settings;
 using Palera1nWin.Core.Usb;
 using Palera1nWin.Core.Util;
 
@@ -50,6 +52,13 @@ public sealed class OpenRa1nService : IDisposable
             return false;
         }
 
+        // This is deliberately scoped to openra1n. The initial DFU driver has already been
+        // verified by the orchestrator; the watchdog only repairs Windows driver flips caused
+        // by DFU/Pongo re-enumeration, matching the original working Palera1nWin flow.
+        using var driverWatch = new LibusbKWatchdog(_monitor, AppSettings.Load());
+        driverWatch.LogReceived += ForwardWatchdogLog;
+        driverWatch.Start();
+
         Emit("openra1n", $"Starting {executable}; hard timeout {(int)_pongoTimeout.TotalSeconds}s.");
         using var processCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         processCts.CancelAfter(_pongoTimeout);
@@ -67,71 +76,78 @@ public sealed class OpenRa1nService : IDisposable
             Emit("openra1n", line, error);
         }
 
-        var runTask = ProcessRunner.RunAsync(
-            executable,
-            [],
-            workingDirectory: Path.GetDirectoryName(executable),
-            cancellationToken: processCts.Token,
-            onStdoutLine: line => Observe(line, false),
-            onStderrLine: line => Observe(line, true),
-            timeout: _pongoTimeout + TimeSpan.FromSeconds(5));
-
-        var pongoDetected = false;
-        var stuck = false;
-        while (!runTask.IsCompleted && !processCts.IsCancellationRequested)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (IsPongoPresent())
-            {
-                pongoDetected = true;
-                Emit("openra1n", "PongoOS USB 05AC:4141 detected; stopping and observing the openra1n process before continuing.");
-                processCts.Cancel();
-                break;
-            }
-
-            DateTimeOffset last;
-            lock (sync) last = lastOutput;
-            if (DateTimeOffset.UtcNow - last > _stuckTimeout)
-            {
-                stuck = true;
-                Emit("openra1n", $"No output for {(int)_stuckTimeout.TotalSeconds}s; stopping the hung process.", true);
-                processCts.Cancel();
-                break;
-            }
-            await Task.Delay(400, cancellationToken).ConfigureAwait(false);
-        }
-
-        ProcessResult? result = null;
         try
         {
-            result = await runTask.ConfigureAwait(false);
-            Emit("openra1n", $"openra1n exited with code {result.ExitCode}.", !result.Succeeded);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            Emit("openra1n", pongoDetected
-                ? "openra1n process stopped after Pongo enumeration."
-                : stuck ? "openra1n process killed after the no-output timeout." : "openra1n timed out.", !pongoDetected);
-        }
+            var runTask = ProcessRunner.RunAsync(
+                executable,
+                [],
+                workingDirectory: Path.GetDirectoryName(executable),
+                cancellationToken: processCts.Token,
+                onStdoutLine: line => Observe(line, false),
+                onStderrLine: line => Observe(line, true),
+                timeout: _pongoTimeout + TimeSpan.FromSeconds(5));
 
-        if (pongoDetected || IsPongoPresent()) return true;
-
-        bool uploaded;
-        lock (sync) uploaded = uploadFinished;
-        if ((uploaded || result?.Succeeded == true) && !cancellationToken.IsCancellationRequested)
-        {
-            Emit("openra1n", $"Upload finished; waiting up to {(int)_postUploadGrace.TotalSeconds}s for Pongo re-enumeration.");
-            var deadline = DateTimeOffset.UtcNow + _postUploadGrace;
-            while (DateTimeOffset.UtcNow < deadline)
+            var pongoDetected = false;
+            var stuck = false;
+            while (!runTask.IsCompleted && !processCts.IsCancellationRequested)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (IsPongoPresent()) return true;
-                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
-            }
-        }
+                if (IsPongoPresent())
+                {
+                    pongoDetected = true;
+                    Emit("openra1n", "PongoOS USB 05AC:4141 detected; stopping and observing the openra1n process before continuing.");
+                    processCts.Cancel();
+                    break;
+                }
 
-        Emit("openra1n", "PongoOS USB device was not detected after the complete native and managed grace windows.", true);
-        return false;
+                DateTimeOffset last;
+                lock (sync) last = lastOutput;
+                if (DateTimeOffset.UtcNow - last > _stuckTimeout)
+                {
+                    stuck = true;
+                    Emit("openra1n", $"No output for {(int)_stuckTimeout.TotalSeconds}s; stopping the hung process.", true);
+                    processCts.Cancel();
+                    break;
+                }
+                await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+            }
+
+            ProcessResult? result = null;
+            try
+            {
+                result = await runTask.ConfigureAwait(false);
+                Emit("openra1n", $"openra1n exited with code {result.ExitCode}.", !result.Succeeded);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                Emit("openra1n", pongoDetected
+                    ? "openra1n process stopped after Pongo enumeration."
+                    : stuck ? "openra1n process killed after the no-output timeout." : "openra1n timed out.", !pongoDetected);
+            }
+
+            if (pongoDetected || IsPongoPresent()) return true;
+
+            bool uploaded;
+            lock (sync) uploaded = uploadFinished;
+            if ((uploaded || result?.Succeeded == true) && !cancellationToken.IsCancellationRequested)
+            {
+                Emit("openra1n", $"Upload finished; waiting up to {(int)_postUploadGrace.TotalSeconds}s for Pongo re-enumeration.");
+                var deadline = DateTimeOffset.UtcNow + _postUploadGrace;
+                while (DateTimeOffset.UtcNow < deadline)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (IsPongoPresent()) return true;
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            Emit("openra1n", "PongoOS USB device was not detected after the complete native and managed grace windows.", true);
+            return false;
+        }
+        finally
+        {
+            driverWatch.LogReceived -= ForwardWatchdogLog;
+        }
     }
 
     private IReadOnlyList<AppleUsbDevice> SafeScan()
@@ -153,6 +169,8 @@ public sealed class OpenRa1nService : IDisposable
         (text.Contains("pongoOS sent", StringComparison.OrdinalIgnoreCase) ||
          text.Contains("Pongo upload finished", StringComparison.OrdinalIgnoreCase) ||
          text.Contains("look for 05ac:4141", StringComparison.OrdinalIgnoreCase));
+
+    private void ForwardWatchdogLog(object? sender, LogLine line) => LogReceived?.Invoke(this, line);
 
     private void Emit(string source, string message, bool isError = false) =>
         LogReceived?.Invoke(this, new LogLine { Source = source, Message = message, IsError = isError });
