@@ -58,7 +58,11 @@ public sealed class AppleUsbMonitor : IDisposable
     public IReadOnlyList<AppleUsbDevice> ScanDevices()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var devices = ScanPnPDevices().ToList();
+
+        // A single normal-mode iPhone/iPad is a USB composite device. Windows exposes the
+        // physical parent plus MI_00/MI_01 child interfaces, so counting raw PnP rows makes one
+        // device look like several and blocks both DFU guidance and workflow startup.
+        var devices = CollapseCompositeInterfaces(ScanPnPDevices()).ToList();
         MergeUsbipdBusIds(devices);
         return devices
             .GroupBy(d => d.DeviceId, StringComparer.OrdinalIgnoreCase)
@@ -144,6 +148,53 @@ public sealed class AppleUsbMonitor : IDisposable
             }
         }
         return results;
+    }
+
+    internal static IReadOnlyList<AppleUsbDevice> CollapseCompositeInterfaces(IEnumerable<AppleUsbDevice> source)
+    {
+        var output = new List<AppleUsbDevice>();
+        foreach (var group in source.GroupBy(
+                     device => (device.VendorId, device.ProductId, device.Mode)))
+        {
+            var rows = group.ToArray();
+            if (rows.Length <= 1)
+            {
+                output.AddRange(rows);
+                continue;
+            }
+
+            // The physical composite parent has no &MI_xx suffix. Collapse only when that
+            // parent is unique. If two physical parents exist, retain both so exact-device
+            // safety still rejects a multi-device setup.
+            var parents = rows
+                .Where(device => !device.DeviceId.Contains("&MI_", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (parents.Length != 1)
+            {
+                output.AddRange(rows);
+                continue;
+            }
+
+            var parent = parents[0];
+            var service = !string.IsNullOrWhiteSpace(parent.Service)
+                ? parent.Service
+                : rows.Select(device => device.Service).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            var name = !string.IsNullOrWhiteSpace(parent.Name)
+                ? parent.Name
+                : rows.Select(device => device.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            var status = !string.IsNullOrWhiteSpace(parent.Status)
+                ? parent.Status
+                : rows.Select(device => device.Status).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+            output.Add(AppleUsbDevice.FromPnpEntity(
+                parent.DeviceId,
+                name,
+                status,
+                service,
+                parent.BusId));
+        }
+
+        return output;
     }
 
     private void MergeUsbipdBusIds(List<AppleUsbDevice> devices)

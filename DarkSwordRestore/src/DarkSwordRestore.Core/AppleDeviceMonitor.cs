@@ -111,8 +111,11 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
             const string script = "$ErrorActionPreference='Stop';" +
                 "$d=Get-PnpDevice -PresentOnly | Where-Object {$_.InstanceId -like 'USB\\VID_05AC&PID_*'} | ForEach-Object {" +
                 "$h=(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data;" +
-                "[pscustomobject]@{FriendlyName=$_.FriendlyName;InstanceId=$_.InstanceId;Service=$_.Service;HardwareIds=($h -join ';')}};" +
-                "$d | ConvertTo-Json -Compress";
+                "$c=(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_ContainerId' -ErrorAction SilentlyContinue).Data;" +
+                "[pscustomobject]@{FriendlyName=$_.FriendlyName;InstanceId=$_.InstanceId;Service=$_.Service;HardwareIds=($h -join ';');ContainerId=([string]$c)}};" +
+                "$d | Group-Object {if ($_.ContainerId) {$_.ContainerId} else {$_.InstanceId}} | ForEach-Object {" +
+                "$_.Group | Sort-Object @{Expression={if ($_.InstanceId -match '&MI_[0-9A-Fa-f]{2}') {1} else {0}}},@{Expression={if ($_.Service) {0} else {1}}} | Select-Object -First 1" +
+                "} | ConvertTo-Json -Compress";
 
             var output = await RunCaptureAsync(
                 powershell,

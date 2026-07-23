@@ -24,12 +24,15 @@ public sealed class AppleUsbDevice
 
     public DeviceMode Mode { get; init; }
 
+    /// <summary>
+    /// Presence and driver health are different facts. Windows frequently reports an Apple
+    /// composite interface as Error/Degraded while the physical device is connected and usable.
+    /// Keep the device visible, then let the workflow validate the mode and required driver.
+    /// </summary>
     public bool IsPresent =>
         !string.IsNullOrWhiteSpace(DeviceId) &&
-        !string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase) &&
-        // Pongo often enumerates as Status=Error until libusbK/WinUSB binds — still real hardware.
-        (ProductId == 0x4141 ||
-         !string.Equals(Status, "Error", StringComparison.OrdinalIgnoreCase));
+        VendorId == 0x05AC &&
+        !string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase);
 
     public static AppleUsbDevice Empty { get; } = new();
 
@@ -70,7 +73,9 @@ public sealed class AppleUsbDevice
     {
         var upperId = deviceId.ToUpperInvariant();
 
-        // Identify Pongo / YOLO / PWND before treating non-OK status as Busy.
+        // Identity markers and known Apple PIDs are authoritative. Do not turn a valid
+        // Normal/Recovery/DFU device into Busy merely because one composite interface has a
+        // transient non-OK PnP status.
         if (productId == 0x4141 || upperId.Contains("PID_4141", StringComparison.Ordinal))
         {
             return DeviceMode.Pongo;
@@ -86,6 +91,19 @@ public sealed class AppleUsbDevice
             return DeviceMode.PwnedDfu;
         }
 
+        var knownMode = productId switch
+        {
+            0x12A0 or 0x12A8 or 0x12AA or 0x12AB => DeviceMode.Normal,
+            0x1280 or 0x1281 or 0x1282 or 0x1283 => DeviceMode.Recovery,
+            0x1227 or 0x1222 => DeviceMode.Dfu,
+            0x4141 => DeviceMode.Pongo,
+            _ => DeviceMode.None,
+        };
+        if (knownMode != DeviceMode.None)
+        {
+            return knownMode;
+        }
+
         if (!string.IsNullOrWhiteSpace(status) &&
             !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(status, "Present", StringComparison.OrdinalIgnoreCase))
@@ -93,14 +111,7 @@ public sealed class AppleUsbDevice
             return DeviceMode.Busy;
         }
 
-        return productId switch
-        {
-            0x12A8 or 0x12AB or 0x12A0 => DeviceMode.Normal,
-            0x1280 or 0x1281 or 0x1282 or 0x1283 => DeviceMode.Recovery,
-            0x1227 or 0x1222 => DeviceMode.Dfu,
-            0x4141 => DeviceMode.Pongo,
-            _ => DeviceMode.None,
-        };
+        return DeviceMode.None;
     }
 
     public override string ToString()
