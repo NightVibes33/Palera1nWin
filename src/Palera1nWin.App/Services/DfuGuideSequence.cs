@@ -49,13 +49,14 @@ public sealed record DfuGuideFrame(
 
 public static class DfuGuideSequence
 {
-    private static readonly TimeSpan UiTick = TimeSpan.FromMilliseconds(80);
+    private static readonly TimeSpan UiTick = TimeSpan.FromMilliseconds(50);
 
     public static async Task<bool> RunAsync(
         DfuGuideButtonProfile profile,
         Func<bool> isDfuDetected,
         Action<DfuGuideFrame> present,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? holdSequenceStarting = null)
     {
         ArgumentNullException.ThrowIfNull(isDfuDetected);
         ArgumentNullException.ThrowIfNull(present);
@@ -66,8 +67,15 @@ public static class DfuGuideSequence
             return true;
         }
 
+        var holdStarted = false;
         foreach (var phase in BuildPlan(profile))
         {
+            if (!holdStarted && phase.Phase == DfuGuidePhase.HoldBoth)
+            {
+                holdStarted = true;
+                holdSequenceStarting?.Invoke();
+            }
+
             if (await RunPhaseAsync(phase, isDfuDetected, present, cancellationToken).ConfigureAwait(true))
             {
                 PresentDetected(profile, present);
@@ -113,7 +121,7 @@ public static class DfuGuideSequence
                 10,
                 "GET READY",
                 "Keep the device connected",
-                "Place one finger on each highlighted button. The timed hold begins when the countdown reaches zero.",
+                "Place one finger on each highlighted button. The native palera1n hold begins when this countdown reaches zero.",
                 "Do not disconnect the cable.",
                 false,
                 false,
@@ -121,13 +129,13 @@ public static class DfuGuideSequence
             new DfuGuidePlanStep(
                 DfuGuidePhase.HoldBoth,
                 profile,
-                TimeSpan.FromSeconds(8),
+                TimeSpan.FromSeconds(4),
                 10,
                 55,
                 "STEP 1 OF 2",
                 $"Hold {firstButtons}",
-                "Press both highlighted buttons now and keep holding them for the entire countdown.",
-                "Keep holding both buttons. Do not release early.",
+                "Press both highlighted buttons now and keep holding them for the full native four-second phase.",
+                "This matches palera1n's physical-button DFU helper timing.",
                 true,
                 profile == DfuGuideButtonProfile.Home,
                 profile == DfuGuideButtonProfile.VolumeDown),
