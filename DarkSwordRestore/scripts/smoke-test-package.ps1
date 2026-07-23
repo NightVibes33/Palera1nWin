@@ -93,6 +93,28 @@ function Invoke-CapturedProcess {
     return [PSCustomObject]@{ ExitCode = $process.ExitCode; Output = ($output -join [Environment]::NewLine) }
 }
 
+function Invoke-BoundedCapturedProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int]$TimeoutMilliseconds = 30000
+    )
+    $stdout = Join-Path $logDirectory "$Name.stdout.txt"
+    $stderr = Join-Path $logDirectory "$Name.stderr.txt"
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $PackageRoot `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+        try { $process.Kill($true) } catch { }
+        throw "$Name exceeded the $TimeoutMilliseconds ms smoke-test timeout."
+    }
+    $output = @()
+    if (Test-Path $stdout) { $output += Get-Content $stdout -Raw }
+    if (Test-Path $stderr) { $output += Get-Content $stderr -Raw }
+    return [PSCustomObject]@{ ExitCode = $process.ExitCode; Output = ($output -join [Environment]::NewLine) }
+}
+
 try {
     $requiredPe = @(
         "Palera1nWin.exe",
@@ -172,7 +194,8 @@ try {
     Assert-BinaryString "toolchain\darksword-pongo.exe" "bootux"
     Assert-BinaryString "toolchain\openra1n.exe" "openra1n-core.exe"
     Assert-BinaryString "toolchain\openra1n.exe" "PongoOS USB 05AC:4141"
-    Assert-BinaryString "toolchain\openra1n.exe" "USB drivers remain managed by the host application"
+    Assert-BinaryString "toolchain\openra1n.exe" "DFU remains owned by Windows"
+    Assert-BinaryDoesNotContain "toolchain\openra1n.exe" "windows\palera1n.ps1"
     Assert-BinaryDoesNotContain "toolchain\openra1n.exe" "wdi-simple.exe"
 
     $nativeManifest = Get-Content (Join-Path $toolchain "native-build-manifest.txt") -Raw
@@ -214,6 +237,24 @@ try {
         if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "Manifest SHA-256 mismatch: $($entry.path)" }
     }
     Write-Status "OK manifest verified $($manifest.Count) files including complete Jailbreak/WSL runtime"
+
+    $uiResultPath = Join-Path $PackageRoot "downgrade-ui-self-test-result.txt"
+    Remove-Item -LiteralPath $uiResultPath -Force -ErrorAction SilentlyContinue
+    $uiSmoke = Invoke-BoundedCapturedProcess `
+        -FilePath (Join-Path $PackageRoot "Palera1nWin.exe") `
+        -ArgumentList @("--downgrade-ui-self-test") `
+        -Name "downgrade-ui-self-test" `
+        -TimeoutMilliseconds 30000
+    $uiResult = if (Test-Path -LiteralPath $uiResultPath) {
+        Get-Content -LiteralPath $uiResultPath -Raw
+    } else {
+        "result file missing"
+    }
+    if ($uiSmoke.ExitCode -ne 0 -or -not $uiResult.StartsWith("PASS:", [System.StringComparison]::Ordinal)) {
+        throw "Downgrade tab UI self-test failed with exit $($uiSmoke.ExitCode). $uiResult $($uiSmoke.Output)"
+    }
+    Write-Status "OK real Downgrade tab Loaded/log/timer/dashboard UI smoke test"
+    Remove-Item -LiteralPath $uiResultPath -Force -ErrorAction SilentlyContinue
 
     $checksumPath = Join-Path $releaseRoot "SHA256SUMS.txt"
     if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw "Release checksum file is missing." }
