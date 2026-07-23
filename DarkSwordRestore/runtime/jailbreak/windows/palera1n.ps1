@@ -13,13 +13,26 @@ function Write-Stage([string]$Message) {
 }
 
 function Quote-Bash([string]$Value) {
-    return "'" + $Value.Replace("'", "'\"'\"'") + "'"
+    if ($null -eq $Value) { return "''" }
+
+    # Bash represents one literal apostrophe inside single quotes as: '"'"'
+    # Construct that sequence from characters so Windows PowerShell 5.1 never
+    # parses nested backslash/double-quote escaping.
+    $apostrophe = [char]39
+    $doubleQuote = [char]34
+    $replacement = "$apostrophe$doubleQuote$apostrophe$doubleQuote$apostrophe"
+    return "$apostrophe$($Value.Replace($apostrophe.ToString(), $replacement))$apostrophe"
 }
 
 function Convert-ToWslPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
-    if ($full -match '^([A-Za-z]):[\\/](.*)$') {
-        return '/mnt/' + $Matches[1].ToLowerInvariant() + '/' + $Matches[2].Replace('\', '/')
+    if ($full.Length -ge 3 -and
+        [char]::IsLetter($full[0]) -and
+        $full[1] -eq ':' -and
+        ($full[2] -eq '\' -or $full[2] -eq '/')) {
+        $drive = [char]::ToLowerInvariant($full[0])
+        $rest = $full.Substring(3).Replace('\', '/')
+        return "/mnt/$drive/$rest"
     }
     throw "The runtime path must be on a local drive: $full"
 }
@@ -39,7 +52,7 @@ function Get-AppleUsbipdRows {
     $rows = @()
     foreach ($line in $lines) {
         if ($line -match '^\s*(?<bus>\d+-\d+(?:\.\d+)*)\s+(?<vidpid>05ac:[0-9a-f]{4})\b') {
-            $rows += [pscustomobject]@{ BusId = $Matches.bus; VidPid = $Matches.vidpid; Raw = $line }
+            $rows += [pscustomobject]@{ BusId = $Matches.bus; VidPid = $Matches.vidpid.ToLowerInvariant(); Raw = $line }
         }
     }
     return ,$rows
@@ -105,7 +118,21 @@ if ($selfTest) {
     if ($bytes.Length -lt 65536 -or $bytes[0] -ne 0x7F -or $bytes[1] -ne 0x45 -or $bytes[2] -ne 0x4C -or $bytes[3] -ne 0x46) {
         throw 'The packaged palera1n runtime is not a valid ELF executable.'
     }
-    Write-Stage 'SELF-TEST OK: launcher, WSL provisioner, compatibility shim, and Linux binary are packaged.'
+
+    $quoteProbe = Quote-Bash "a'b"
+    $apostrophe = ([char]39).ToString()
+    $doubleQuote = ([char]34).ToString()
+    $expectedQuote = $apostrophe + 'a' + $apostrophe + $doubleQuote + $apostrophe + $doubleQuote + $apostrophe + 'b' + $apostrophe
+    if ($quoteProbe -ne $expectedQuote) {
+        throw "Bash quoting self-test failed: $quoteProbe"
+    }
+
+    $pathProbe = Convert-ToWslPath 'C:\Palera1nWin\runtime\test.sh'
+    if ($pathProbe -ne '/mnt/c/Palera1nWin/runtime/test.sh') {
+        throw "WSL path conversion self-test failed: $pathProbe"
+    }
+
+    Write-Stage 'SELF-TEST OK: launcher parsed, Bash quoting and WSL paths passed, continuation shim and Linux binary are packaged.'
     exit 0
 }
 
@@ -128,10 +155,21 @@ try {
     & wsl.exe -d $distro -u root -- test -x /opt/palera1n/pln-run.sh
     if ($LASTEXITCODE -ne 0) { throw "palera1n runtime is not provisioned in WSL '$distro'. Use Setup > Provision WSL." }
 
+    # Clean DFU uses official palera1n's internally matched checkra1n/Pongo pair.
+    # Existing Pongo 05ac:4141 uses the packaged no-op handoff helper so the
+    # full jailbreak continuation cannot trigger a second checkm8 run.
+    $effectiveArgs = [Collections.Generic.List[string]]::new()
+    foreach ($value in $palera1nArgs) { $effectiveArgs.Add($value) }
+    if ($selected -and $selected.VidPid -eq '05ac:4141') {
+        $effectiveArgs.Add('--override-checkra1n')
+        $effectiveArgs.Add('/opt/palera1n/checkra1n')
+        Write-Stage 'Verified PongoOS handoff; enabling the continuation-only checkra1n shim.'
+    }
+
     $runtime = if ($env:PALERA1NWIN_RUNTIME) { $env:PALERA1NWIN_RUNTIME } else { Join-Path $env:LOCALAPPDATA 'Palera1nWin\runtime' }
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
     $temporaryScript = Join-Path $runtime ("palera1n-run-{0}.sh" -f [Guid]::NewGuid().ToString('N'))
-    $shellArguments = ($palera1nArgs | ForEach-Object { Quote-Bash $_ }) -join ' '
+    $shellArguments = ($effectiveArgs | ForEach-Object { Quote-Bash $_ }) -join ' '
     $shell = "#!/usr/bin/env bash`nset -Eeuo pipefail`nexec /opt/palera1n/pln-run.sh $shellArguments`n"
     [IO.File]::WriteAllText($temporaryScript, $shell, [Text.UTF8Encoding]::new($false))
     $wslScript = Convert-ToWslPath $temporaryScript
