@@ -2,12 +2,19 @@
 
 Experimental Windows application that combines a **palera1n jailbreak workflow** with the **DarkSword iOS/iPadOS 15 tethered-downgrade workflow** in one WPF interface.
 
-The packaged application is named **DarkSword Restore**, while the main executable remains `Palera1nWin.exe`.
+The complete application is built from `src/Palera1nWin.App/Palera1nWin.App.csproj`. The executable users run is **`Palera1nWin.exe`**. The tested ZIP artifact is named **`DarkSword-Restore-win-x64`** because DarkSword Restore is the integrated downgrade feature; it is not a separate frontend that should replace `Palera1nWin.exe`.
+
+The current `Palera1nWin.exe` contains the redesigned Downgrade experience with these four primary actions:
+
+1. **Start Downgrade**
+2. **Test DFU → Pwned/Pongo**
+3. **Boot Device**
+4. **Import Boot Profile**
 
 > [!WARNING]
 > This project is under active development. The current source builds, tests, packages, and passes deterministic runtime smoke tests in GitHub Actions, but a green CI build does **not** prove that a physical device can complete checkm8, boot PongoOS, jailbreak, restore firmware, or tether-boot successfully.
 >
-> The current loader replacement still requires confirmation on the primary test device: **iPad 5th generation Wi-Fi (`iPad6,11`, A9) running iPadOS 16.7.11**.
+> The restored Windows-native Pongo pipeline still requires confirmation on the primary test device: **iPad 5th generation Wi-Fi (`iPad6,11`, A9) running iPadOS 16.7.11**.
 
 > [!CAUTION]
 > **Downgrade erases the device.** Back up important data, save authenticator recovery codes, and know the Apple ID password associated with Activation Lock before approving an erase.
@@ -20,11 +27,12 @@ This is not an official palera1n, Apple, openra1n, libimobiledevice, usbipd-win,
 
 | Area | Current status |
 |---|---|
-| Windows WPF application | Builds and launches in CI |
-| Managed tests | Passing |
-| Windows PowerShell launcher | Parsed and executed by packaged smoke tests |
+| Correct build target | `src/Palera1nWin.App/Palera1nWin.App.csproj` → `Palera1nWin.exe` |
+| Four-action Downgrade UI | Present in the integrated Palera1nWin application |
+| Downgrade-tab startup crash | Null-reference initialization regression fixed and covered by the packaged UI smoke test |
+| Managed tests | Passing on the validated pull-request head |
 | Native Windows toolchain | Built from pinned source revisions |
-| Portable ZIP packaging | Passing manifest and SHA-256 verification |
+| Portable ZIP packaging | Manifest and SHA-256 verification included |
 | Jailbreak on a physical device | **Not yet confirmed with the current build** |
 | PongoOS handoff on `iPad6,11` | **Requires a new physical test** |
 | Complete iOS 15 downgrade | **Not yet physically confirmed** |
@@ -32,10 +40,18 @@ This is not an official palera1n, Apple, openra1n, libimobiledevice, usbipd-win,
 
 Earlier physical testing exposed two real defects:
 
-1. The packaged `palera1n.ps1` file could fail Windows PowerShell parsing before palera1n started.
-2. The old production Pongo route mixed openra1n's legacy boot shellcode with a different palera1n Pongo image, allowing checkm8 and payload transfer to finish while the device returned to normal mode.
+1. The packaged `palera1n.ps1` file could fail Windows PowerShell parsing before continuation started.
+2. A later replacement routed the initial DFU/checkm8/Pongo stage through WSL and mixed loader ownership in a way that allowed the device to return to normal mode instead of remaining in PongoOS.
 
-The current build replaces that production path with official palera1n's internally matched checkra1n/Pongo pair and adds an actual Windows PowerShell parser regression. Physical validation is still required.
+The latest merged fix restores the original shared ownership model:
+
+- **Windows-native `openra1n-core.exe` owns DFU, checkm8, and the initial PongoOS launch.**
+- Windows keeps the DFU device until PongoOS enumerates as Apple USB **`05AC:4141`**.
+- Only after PongoOS exists does the app hand that device to WSL for palera1n continuation.
+- The corrected PowerShell parser and explicit Pongo continuation shim remain included.
+- Jailbreak, the non-destructive DFU/Pongo test, and Downgrade all use this same initial Windows-native pipeline.
+
+Physical validation is still required.
 
 ---
 
@@ -49,20 +65,20 @@ Current flow:
 
 1. Validate the packaged runtime, WSL installation, USB state, and connected Apple device.
 2. Temporarily stop Apple Mobile Device Service when required.
-3. Guide the user into DFU with the synchronized device-bezel animation.
-4. Assign the required DFU USB driver and transfer the selected Apple USB device through `usbipd-win`.
-5. Start official palera1n's matched checkra1n/Pongo loader in WSL.
-6. Detect PongoOS as Apple USB `05AC:4141`.
-7. Continue with palera1n's jailbreak payload flow.
+3. Start the detailed DFU bezel guide from palera1n's real DFU prompt.
+4. Keep DFU under Windows ownership and run the pinned Windows-native openra1n checkm8/Pongo core.
+5. Detect PongoOS as Apple USB `05AC:4141`.
+6. Hand only the PongoOS USB device to WSL.
+7. Continue palera1n's jailbreak payload flow through the packaged continuation runtime.
 8. Clean up USB ownership and restore services.
 
 Rootless is the recommended option. A full device reboot removes the active jailbreak state, so the Jailbreak workflow must be run again.
 
 ### DarkSword downgrade
 
-Use **Downgrade** to erase the device and install a supported iOS/iPadOS 15 IPSW through the DarkSword restore backend.
+Use **Downgrade** to erase the device and install a supported iOS/iPadOS 15 IPSW through the integrated DarkSword restore backend inside `Palera1nWin.exe`.
 
-The visible Downgrade screen has four primary actions:
+The visible Downgrade experience has four primary actions:
 
 | Action | Purpose |
 |---|---|
@@ -99,7 +115,7 @@ A DarkSword-downgraded installation is designed to be tethered. After any full s
 
 1. Connect the exact downgraded device.
 2. Enter clean DFU.
-3. Open **Downgrade**.
+3. Run `Palera1nWin.exe` and open **Downgrade**.
 4. Import the correct `boot-profile.json` if it was not detected automatically.
 5. Press **Boot Device**.
 
@@ -109,22 +125,24 @@ The app rechecks ProductType, ECID, profile integrity, PTE data, and required re
 
 ## Guided DFU interface
 
-Both workflows use the same synchronized DFU guide.
+Both workflows use the same synchronized detailed DFU guide.
+
+For the iPad 5th generation, the current native sequence is:
+
+1. **Prepare for 3 seconds.**
+2. Hold **Top + Home for 4 seconds**.
+3. Release Top and keep holding **Home for 10 seconds**.
+4. Stop immediately when real DFU or PongoOS is detected.
 
 The guide includes:
 
 - A device bezel overlay with highlighted physical buttons
 - Device-specific button labels
-- A three-second preparation phase
-- An eight-second dual-button hold phase
-- A ten-second second-button hold phase
 - Stopwatch-based timing instead of accumulating one-second UI delays
 - A large countdown, progress indicator, and current-step instructions
 - Immediate completion when real DFU or PongoOS is detected
 - A warning that a correct DFU screen remains completely black
 - Cancel and retry handling
-
-For the iPad 5th generation, the guide uses the **Top + Home** sequence.
 
 ---
 
@@ -159,7 +177,7 @@ The downgrade preflight calculates required storage as the greater of approximat
 
 1. Download and fully extract the current `DarkSword-Restore-win-x64` package.
 2. Do not overwrite an older extracted build. Use a new folder.
-3. Run `Palera1nWin.exe` as Administrator.
+3. Run **`Palera1nWin.exe`** as Administrator.
 4. Open **Setup**.
 5. Confirm WSL2, Ubuntu, `usbipd-win`, the bundled toolchain, and Apple drivers are detected.
 6. Press **Provision WSL**.
@@ -175,20 +193,20 @@ Re-run **Provision WSL** after installing a build that changes the packaged pale
 For the iPad 5 development target:
 
 1. Extract the latest build into a new folder.
-2. Run the app as Administrator.
+2. Run `Palera1nWin.exe` as Administrator.
 3. Provision WSL again.
 4. Enter clean DFU.
-5. Press **Test DFU → Pwned/Pongo** before attempting an erase.
+5. Open **Downgrade** and press **Test DFU → Pwned/Pongo** before attempting an erase.
 6. Confirm the log contains:
 
 ```text
-[DarkSword] Starting official palera1n matched checkra1n/PongoOS loader
+[DarkSword] Starting Windows-native openra1n checkm8/PongoOS core. DFU remains owned by Windows until 05AC:4141 appears.
 ```
 
-7. Confirm Windows detects PongoOS USB `05AC:4141`.
+7. Confirm the log later reports PongoOS USB `05AC:4141` enumeration.
 8. Only after the non-destructive test passes should **Start Downgrade** be considered.
 
-If the log says `Starting Windows checkm8/PongoOS core`, an older build is running.
+A package that says it is starting the official palera1n matched Pongo loader directly in WSL is the superseded build, not the current restored pipeline.
 
 ---
 
@@ -200,6 +218,7 @@ Depending on device mode it may:
 
 - Stop and later restore Apple Mobile Device Service
 - Verify or install `libusbK` for Apple DFU `05AC:1227`
+- Keep DFU under Windows control during the initial checkm8/Pongo launch
 - Accept `libusbK` or WinUSB for PongoOS `05AC:4141`
 - Bind, attach, detach, or unbind the exact Apple USB bus through `usbipd-win`
 - Reject multiple connected Apple devices
@@ -219,10 +238,10 @@ Important components include:
 
 | Component | Role |
 |---|---|
-| `Palera1nWin.exe` | Main WPF application |
-| `toolchain/openra1n.exe` | Shared Windows entry point that starts official palera1n's matched Pongo loader in WSL and watches for `05AC:4141` |
-| `toolchain/openra1n-core.exe` | Legacy openra1n diagnostic binary; no longer the production Pongo boot path |
-| `toolchain/windows/palera1n.ps1` | Windows PowerShell/WSL launcher |
+| `Palera1nWin.exe` | Main WPF application containing Jailbreak and the four-action DarkSword Downgrade interface |
+| `toolchain/openra1n.exe` | Shared Windows wrapper that launches the pinned native core and watches for PongoOS `05AC:4141` |
+| `toolchain/openra1n-core.exe` | Production Windows-native DFU/checkm8/PongoOS core used before any WSL handoff |
+| `toolchain/windows/palera1n.ps1` | Corrected Windows PowerShell/WSL launcher used for palera1n continuation |
 | `toolchain/palera1n.cmd` | Command wrapper for the PowerShell launcher |
 | `toolchain/dist/palera1n-linux-x86_64` | Pinned official palera1n Linux runtime |
 | `toolchain/turdus_merula.exe` | Restore and SHC/PTE operations |
@@ -264,7 +283,7 @@ That indicates an obsolete package containing the old broken launcher. Delete th
 
 ### Checkm8 succeeds but the device returns to normal mode
 
-This means exploit stages and payload transfer are not enough by themselves. PongoOS must enumerate as `05AC:4141`. Use the latest matched-loader build, a direct USB port, and the non-destructive DFU/Pongo test before attempting a downgrade.
+This means exploit stages and payload transfer are not enough by themselves. PongoOS must enumerate as `05AC:4141`. Use the current restored Windows-native openra1n build, a direct USB port, and the non-destructive DFU/Pongo test before attempting a downgrade.
 
 ### PongoOS never appears
 
@@ -290,7 +309,7 @@ UsbDk can conflict with `usbipd-win`. Remove UsbDk, reboot Windows, and retry.
 
 ---
 
-## Building the managed application
+## Building the correct application
 
 Install the .NET 8 and .NET 10 SDKs, then run:
 
@@ -329,15 +348,22 @@ dotnet publish src/Palera1nWin.App/Palera1nWin.App.csproj `
   -o DarkSwordRestore/build/publish
 ```
 
+The expected executable is:
+
+```text
+DarkSwordRestore/build/publish/Palera1nWin.exe
+```
+
 The complete native Windows toolchain is built by `.github/workflows/darksword-restore-windows.yml` using pinned source revisions and MSYS2/MinGW64. The workflow then:
 
-1. Builds and tests the managed application.
-2. Builds the native restore toolchain.
+1. Builds and tests the integrated `Palera1nWin.exe` application.
+2. Builds the native restore and Pongo toolchain.
 3. Verifies required binaries and source pins.
 4. Creates the portable package.
-5. Runs the packaged-runtime smoke test.
-6. Generates manifest and SHA-256 data.
-7. Uploads the `DarkSword-Restore-win-x64` artifact.
+5. Launches the real packaged Downgrade UI during smoke testing.
+6. Exercises the Loaded/log/timer/dashboard initialization path that previously crashed.
+7. Generates manifest and SHA-256 data.
+8. Uploads the `DarkSword-Restore-win-x64` artifact.
 
 Tagged public releases additionally require configured Windows Authenticode signing credentials.
 
@@ -347,7 +373,7 @@ Tagged public releases additionally require configured Windows Authenticode sign
 
 | Path | Purpose |
 |---|---|
-| `src/Palera1nWin.App` | WPF user interface, onboarding, setup, Jailbreak, Downgrade, and DFU guide |
+| `src/Palera1nWin.App` | Correct WPF executable, onboarding, setup, Jailbreak, four-action Downgrade UI, and DFU guide |
 | `src/Palera1nWin.Core` | Jailbreak orchestration, USB monitoring, drivers, WSL, usbipd, process handling, and settings |
 | `DarkSwordRestore/src/DarkSwordRestore.Core` | IPSW inspection, exact identity binding, restore sessions, Pongo bridge, SHC/PTE flow, tether boot, and support exports |
 | `DarkSwordRestore/native` | Windows native wrappers and Pongo bridge sources |
