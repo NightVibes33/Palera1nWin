@@ -28,14 +28,16 @@ public sealed class DfuGuideSourceTests
         File.ReadAllText(Path.Combine([RepositoryRoot(), .. path]), Encoding.UTF8);
 
     [Fact]
-    public void CountdownUsesMonotonicElapsedTimeAndExactPhases()
+    public void CountdownUsesMonotonicElapsedTimeAndNativePalera1nPhases()
     {
         var source = Read("src", "Palera1nWin.App", "Services", "DfuGuideSequence.cs");
 
         Assert.Contains("Stopwatch.StartNew()", source, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromSeconds(3)", source, StringComparison.Ordinal);
-        Assert.Contains("TimeSpan.FromSeconds(8)", source, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromSeconds(4)", source, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromSeconds(10)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("TimeSpan.FromSeconds(8)", source, StringComparison.Ordinal);
+        Assert.Contains("holdSequenceStarting", source, StringComparison.Ordinal);
         Assert.Contains("if (isDfuDetected()) return true", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay(TimeSpan.FromSeconds(1)", source, StringComparison.Ordinal);
     }
@@ -55,26 +57,32 @@ public sealed class DfuGuideSourceTests
     }
 
     [Fact]
-    public void JailbreakAndDowngradeBothUseTheDetailedGuide()
+    public void JailbreakVisualStartsFromTheNativePromptInsteadOfHijackingStart()
     {
-        var source = Read("src", "Palera1nWin.App", "Views", "DetailedDfuGuideFeature.cs");
+        var feature = Read("src", "Palera1nWin.App", "Views", "DetailedDfuGuideFeature.cs");
+        var prompts = Read("src", "Palera1nWin.App", "Services", "WpfUserPromptService.cs");
 
-        Assert.Contains("typeof(JailbreakView)", source, StringComparison.Ordinal);
-        Assert.Contains("typeof(DowngradeView)", source, StringComparison.Ordinal);
-        Assert.Contains("DfuGuideSequence.RunAsync", source, StringComparison.Ordinal);
-        Assert.Contains("_detailedJailbreakStartCommand.Execute(null)", source, StringComparison.Ordinal);
-        Assert.Contains("SetDfuGuideSuccess()", source, StringComparison.Ordinal);
+        Assert.Contains("typeof(JailbreakView)", feature, StringComparison.Ordinal);
+        Assert.Contains("typeof(DowngradeView)", feature, StringComparison.Ordinal);
+        Assert.Contains("JailbreakDfuVisualCoordinator", feature, StringComparison.Ordinal);
+        Assert.Contains("BeginFromNativePromptAsync", prompts, StringComparison.Ordinal);
+        Assert.Contains("Ready for DFU mode?", prompts, StringComparison.Ordinal);
+        Assert.DoesNotContain("_detailedJailbreakStartCommand", feature, StringComparison.Ordinal);
+        Assert.Contains("SetDfuGuideSuccess()", feature, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PongoRuntimeIsSharedByJailbreakAndDarkSword()
+    public void WindowsOwnsDfuUntilTheSharedPongoStageCompletes()
     {
         var orchestrator = Read("src", "Palera1nWin.Core", "Orchestration", "JailbreakOrchestrator.cs");
         var nativeBuild = Read("DarkSwordRestore", "scripts", "run-native-build.sh");
+        var wrapper = Read("DarkSwordRestore", "native", "openra1n-wrapper", "openra1n_wrapper.c");
 
         Assert.Contains("new OpenRa1nService(_monitor)", orchestrator, StringComparison.Ordinal);
         Assert.Contains("openra1n-core.exe", nativeBuild, StringComparison.Ordinal);
-        Assert.Contains("PALERA1N_PONGO_SHA256", nativeBuild, StringComparison.Ordinal);
-        Assert.Contains("5475c5f701423858b34e92176c966a9d4b12950f38acb8d1c347f14d5b272655", nativeBuild, StringComparison.Ordinal);
+        Assert.Contains("patch-openra1n.py", nativeBuild, StringComparison.Ordinal);
+        Assert.DoesNotContain("PALERA1N_PONGO_SHA256", nativeBuild, StringComparison.Ordinal);
+        Assert.Contains("Windows-native openra1n", wrapper, StringComparison.Ordinal);
+        Assert.DoesNotContain("windows\\\\palera1n.ps1", wrapper, StringComparison.Ordinal);
     }
 }
