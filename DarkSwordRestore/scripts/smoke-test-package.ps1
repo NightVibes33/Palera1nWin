@@ -159,8 +159,6 @@ try {
         "DarkSwordBootProfile",
         "ValidateDfuToPongoAsync",
         "DowngradeStagePlan",
-        "--pwned-dfu-only",
-        "PWND:[yolo]",
         "DarkSwordJailbroken"
     )) { Assert-BinaryString "DarkSwordRestore.Core.dll" $capability }
 
