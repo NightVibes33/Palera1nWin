@@ -6,6 +6,7 @@ namespace Palera1nWin.App.Services;
 public sealed class OnboardingState
 {
     public int SchemaVersion { get; set; } = 1;
+    public int PreparedContentVersion { get; set; }
     public int CompletedContentVersion { get; set; }
     public bool JailbreakGuideCompleted { get; set; }
     public bool DowngradeGuideCompleted { get; set; }
@@ -37,23 +38,29 @@ public static class OnboardingStateStore
     {
         try
         {
-            if (!File.Exists(FilePath)) return new OnboardingState();
+            if (!File.Exists(FilePath))
+            {
+                return new OnboardingState { PreparedContentVersion = CurrentContentVersion };
+            }
+
             var state = JsonSerializer.Deserialize<OnboardingState>(File.ReadAllText(FilePath), JsonOptions)
                 ?? new OnboardingState();
 
-            if (state.CompletedContentVersion < CurrentContentVersion)
+            if (state.PreparedContentVersion < CurrentContentVersion)
             {
+                state.PreparedContentVersion = CurrentContentVersion;
                 state.JailbreakGuideCompleted = false;
                 state.DowngradeGuideCompleted = false;
                 state.ColdBootGuideCompleted = false;
                 state.CompletedAt = null;
+                Save(state);
             }
 
             return state;
         }
         catch
         {
-            return new OnboardingState();
+            return new OnboardingState { PreparedContentVersion = CurrentContentVersion };
         }
     }
 
@@ -62,12 +69,14 @@ public static class OnboardingStateStore
 
     public static void MarkViewed(OnboardingState state)
     {
+        state.PreparedContentVersion = CurrentContentVersion;
         state.LastViewedAt = DateTimeOffset.UtcNow;
         Save(state);
     }
 
     public static void MarkSectionComplete(OnboardingState state, OnboardingSection section)
     {
+        state.PreparedContentVersion = CurrentContentVersion;
         switch (section)
         {
             case OnboardingSection.Jailbreak:
@@ -95,6 +104,7 @@ public static class OnboardingStateStore
 
     public static void CompleteAll(OnboardingState state)
     {
+        state.PreparedContentVersion = CurrentContentVersion;
         state.JailbreakGuideCompleted = true;
         state.DowngradeGuideCompleted = true;
         state.ColdBootGuideCompleted = true;
