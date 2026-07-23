@@ -52,6 +52,13 @@ public partial class DowngradeView : UserControl, IDisposable
         _driver = new DfuDriverService(_runner, _tools);
         _orchestrator = new DarkSwordOrchestrator(_tools, _runner, _inspector, _monitor, _sessions, _driver);
 
+        // Activate the DarkSword Quick Actions surface immediately after every
+        // dependency and XAML control exists. This hides the legacy downloader,
+        // readiness, confirmation, diagnostics, and restore-control maze while
+        // keeping those controls alive behind the four-action workflow.
+        WireDowngradeExperienceHooks();
+        InitializeUiHardening();
+
         Loaded += DowngradeView_Loaded;
     }
 
