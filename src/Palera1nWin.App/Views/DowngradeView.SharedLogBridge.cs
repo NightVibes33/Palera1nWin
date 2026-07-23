@@ -87,8 +87,16 @@ public partial class DowngradeView
                 // A native process may be appending at the same moment. Retry next tick.
             }
 
-            var shell = view.DataContext as MainViewModel ??
-                        Application.Current?.MainWindow?.DataContext as MainViewModel;
+            // The normal AppendLog path already forwards through the page DataContext.
+            // This bridge is only the fallback for the startup/background-output case
+            // where that inherited DataContext is absent.
+            if (view.DataContext is MainViewModel)
+            {
+                while (_pending.TryDequeue(out _)) { }
+                return;
+            }
+
+            var shell = Application.Current?.MainWindow?.DataContext as MainViewModel;
             if (shell is null) return;
 
             while (_pending.TryDequeue(out var line))
