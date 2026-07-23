@@ -63,4 +63,27 @@ public sealed class OnboardingThemeSourceTests
         Assert.Contains("CurrentContentVersion = 2", store, StringComparison.Ordinal);
         Assert.Contains("PreparedContentVersion", store, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void DowngradeOperationalDashboardDoesNotPublishInitializationBeforeControlsExist()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                RepositoryRoot(),
+                "src",
+                "Palera1nWin.App",
+                "Views",
+                "DowngradeView.OperationalExperience.cs"),
+            Encoding.UTF8);
+
+        Assert.Contains("if (!BuildOperationalPanel())", source, StringComparison.Ordinal);
+        Assert.Contains("QueueOperationalInitializationRetry", source, StringComparison.Ordinal);
+        Assert.Contains("OperationalDashboardControlsReady", source, StringComparison.Ordinal);
+        Assert.Contains("if (!OperationalDashboardReady) return;", source, StringComparison.Ordinal);
+        Assert.Contains("FindOperationalRootPanel", source, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "_operationalExperienceInitialized = true;\n        BuildOperationalPanel();",
+            source,
+            StringComparison.Ordinal);
+    }
 }
