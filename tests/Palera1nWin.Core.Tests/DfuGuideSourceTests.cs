@@ -37,6 +37,7 @@ public sealed class DfuGuideSourceTests
         Assert.Contains("TimeSpan.FromSeconds(4)", source, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromSeconds(10)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("TimeSpan.FromSeconds(8)", source, StringComparison.Ordinal);
+        Assert.Contains("full native four-second phase", source, StringComparison.Ordinal);
         Assert.Contains("holdSequenceStarting", source, StringComparison.Ordinal);
         Assert.Contains("if (isDfuDetected()) return true", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay(TimeSpan.FromSeconds(1)", source, StringComparison.Ordinal);
