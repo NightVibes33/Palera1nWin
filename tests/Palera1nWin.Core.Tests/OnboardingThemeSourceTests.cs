@@ -60,8 +60,24 @@ public sealed class OnboardingThemeSourceTests
             Path.Combine(RepositoryRoot(), "src", "Palera1nWin.App", "Services", "OnboardingStateStore.cs"),
             Encoding.UTF8);
 
-        Assert.Contains("CurrentContentVersion = 2", store, StringComparison.Ordinal);
+        Assert.Contains("CurrentContentVersion = 3", store, StringComparison.Ordinal);
         Assert.Contains("PreparedContentVersion", store, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MainWindowAutomaticallySchedulesFirstRunOnboarding()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(RepositoryRoot(), "src", "Palera1nWin.App", "MainWindow.xaml.cs"),
+            Encoding.UTF8);
+
+        var navigate = source.IndexOf("NavigateToTab(tab);", StringComparison.Ordinal);
+        var onboarding = source.IndexOf("OnboardingWindow.ShowFirstRun(this)", StringComparison.Ordinal);
+
+        Assert.True(navigate >= 0, "MainWindow must perform initial navigation.");
+        Assert.True(onboarding > navigate, "Onboarding must be scheduled after initial navigation.");
+        Assert.Contains("DispatcherPriority.ContextIdle", source, StringComparison.Ordinal);
+        Assert.Contains("_firstRunOnboardingScheduled", source, StringComparison.Ordinal);
     }
 
     [Fact]
