@@ -66,8 +66,7 @@ public static class DfuGuideSequence
             return true;
         }
 
-        var phases = BuildPlan(profile);
-        foreach (var phase in phases)
+        foreach (var phase in BuildPlan(profile))
         {
             if (await RunPhaseAsync(phase, isDfuDetected, present, cancellationToken).ConfigureAwait(true))
             {
@@ -108,6 +107,7 @@ public static class DfuGuideSequence
         [
             new DfuGuidePlanStep(
                 DfuGuidePhase.Preparing,
+                profile,
                 TimeSpan.FromSeconds(3),
                 0,
                 10,
@@ -120,6 +120,7 @@ public static class DfuGuideSequence
                 false),
             new DfuGuidePlanStep(
                 DfuGuidePhase.HoldBoth,
+                profile,
                 TimeSpan.FromSeconds(8),
                 10,
                 55,
@@ -132,6 +133,7 @@ public static class DfuGuideSequence
                 profile == DfuGuideButtonProfile.VolumeDown),
             new DfuGuidePlanStep(
                 DfuGuidePhase.HoldSecond,
+                profile,
                 TimeSpan.FromSeconds(10),
                 55,
                 92,
@@ -144,6 +146,7 @@ public static class DfuGuideSequence
                 profile == DfuGuideButtonProfile.VolumeDown),
             new DfuGuidePlanStep(
                 DfuGuidePhase.WaitingForDevice,
+                profile,
                 TimeSpan.FromSeconds(12),
                 92,
                 100,
@@ -164,7 +167,6 @@ public static class DfuGuideSequence
         CancellationToken cancellationToken)
     {
         var clock = Stopwatch.StartNew();
-        var lastWholeSecond = int.MinValue;
 
         while (clock.Elapsed < phase.Duration)
         {
@@ -175,38 +177,18 @@ public static class DfuGuideSequence
             var remaining = Math.Max(1, (int)Math.Ceiling((phase.Duration - clock.Elapsed).TotalSeconds));
             var progress = phase.ProgressStart + ((phase.ProgressEnd - phase.ProgressStart) * fraction);
 
-            if (remaining != lastWholeSecond || fraction == 0)
-            {
-                lastWholeSecond = remaining;
-                present(new DfuGuideFrame(
-                    phase.Phase,
-                    phase.Profile,
-                    phase.Eyebrow,
-                    phase.Title,
-                    phase.Instruction,
-                    phase.Detail,
-                    remaining,
-                    progress,
-                    phase.PowerButtonActive,
-                    phase.HomeButtonActive,
-                    phase.VolumeDownButtonActive));
-            }
-            else
-            {
-                // Keep the progress bar smooth without changing the visible whole-second countdown.
-                present(new DfuGuideFrame(
-                    phase.Phase,
-                    phase.Profile,
-                    phase.Eyebrow,
-                    phase.Title,
-                    phase.Instruction,
-                    phase.Detail,
-                    remaining,
-                    progress,
-                    phase.PowerButtonActive,
-                    phase.HomeButtonActive,
-                    phase.VolumeDownButtonActive));
-            }
+            present(new DfuGuideFrame(
+                phase.Phase,
+                phase.Profile,
+                phase.Eyebrow,
+                phase.Title,
+                phase.Instruction,
+                phase.Detail,
+                remaining,
+                progress,
+                phase.PowerButtonActive,
+                phase.HomeButtonActive,
+                phase.VolumeDownButtonActive));
 
             var remainingTick = phase.Duration - clock.Elapsed;
             await Task.Delay(remainingTick < UiTick ? remainingTick : UiTick, cancellationToken).ConfigureAwait(true);
@@ -244,6 +226,7 @@ public static class DfuGuideSequence
 
 public sealed record DfuGuidePlanStep(
     DfuGuidePhase Phase,
+    DfuGuideButtonProfile Profile,
     TimeSpan Duration,
     double ProgressStart,
     double ProgressEnd,
@@ -253,9 +236,4 @@ public sealed record DfuGuidePlanStep(
     string Detail,
     bool PowerButtonActive,
     bool HomeButtonActive,
-    bool VolumeDownButtonActive)
-{
-    public DfuGuideButtonProfile Profile => VolumeDownButtonActive
-        ? DfuGuideButtonProfile.VolumeDown
-        : DfuGuideButtonProfile.Home;
-}
+    bool VolumeDownButtonActive);
