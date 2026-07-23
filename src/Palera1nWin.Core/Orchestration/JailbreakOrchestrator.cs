@@ -141,29 +141,62 @@ public sealed class JailbreakOrchestrator : IDisposable
                     return JailbreakStage.Failed;
                 }
 
-                Report(JailbreakStage.RunningOpenRa1n, "Running openra1n until PongoOS is observed and the child exits...", 42);
-                if (!await _openRa1nService.RunUntilPongoAsync(toolchain, cancellationToken).ConfigureAwait(false))
+                using var driverWatch = new LibusbKWatchdog(_monitor, _settings);
+                driverWatch.LogReceived += ForwardLog;
+                driverWatch.Start();
+                try
                 {
-                    Fail("PongoOS USB 05AC:4141 was not detected after openra1n.");
-                    return JailbreakStage.Failed;
+                    Report(JailbreakStage.RunningOpenRa1n, "Running openra1n until PongoOS is observed and the child exits...", 42);
+                    if (!await _openRa1nService.RunUntilPongoAsync(toolchain, cancellationToken).ConfigureAwait(false))
+                    {
+                        Fail("PongoOS USB 05AC:4141 was not detected after openra1n.");
+                        return JailbreakStage.Failed;
+                    }
+
+                    Report(JailbreakStage.EnsuringPongoDriver, "Verifying the single PongoOS device and host driver...", 60);
+                    if (!await EnsureModeDriverAsync(
+                            DeviceMode.Pongo,
+                            0x4141,
+                            allowWinUsb: true,
+                            cancellationToken).ConfigureAwait(false))
+                    {
+                        return JailbreakStage.Failed;
+                    }
+                    _ = RequireSingleDeviceForPid(0x4141);
+                }
+                finally
+                {
+                    driverWatch.LogReceived -= ForwardLog;
+                    driverWatch.Stop();
                 }
             }
             else
             {
                 Report(JailbreakStage.RunningOpenRa1n, "PongoOS is already present; skipping openra1n.", 48);
                 if (!ReleaseSelectedAppleToWindows()) return JailbreakStage.Failed;
-            }
 
-            Report(JailbreakStage.EnsuringPongoDriver, "Verifying the single PongoOS device and host driver...", 60);
-            if (!await EnsureModeDriverAsync(
-                    DeviceMode.Pongo,
-                    0x4141,
-                    allowWinUsb: true,
-                    cancellationToken).ConfigureAwait(false))
-            {
-                return JailbreakStage.Failed;
+                using var pongoWatch = new LibusbKWatchdog(_monitor, _settings);
+                pongoWatch.LogReceived += ForwardLog;
+                pongoWatch.Start();
+                try
+                {
+                    Report(JailbreakStage.EnsuringPongoDriver, "Verifying the single PongoOS device and host driver...", 60);
+                    if (!await EnsureModeDriverAsync(
+                            DeviceMode.Pongo,
+                            0x4141,
+                            allowWinUsb: true,
+                            cancellationToken).ConfigureAwait(false))
+                    {
+                        return JailbreakStage.Failed;
+                    }
+                    _ = RequireSingleDeviceForPid(0x4141);
+                }
+                finally
+                {
+                    pongoWatch.LogReceived -= ForwardLog;
+                    pongoWatch.Stop();
+                }
             }
-            _ = RequireSingleDeviceForPid(0x4141);
 
             Report(JailbreakStage.RunningPalera1n, $"Running palera1n in {_resolvedDistro} through the selected USB bus...", 75);
             var options = new JailbreakOptions

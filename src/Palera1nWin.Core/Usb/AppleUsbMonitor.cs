@@ -58,15 +58,26 @@ public sealed class AppleUsbMonitor : IDisposable
     public IReadOnlyList<AppleUsbDevice> ScanDevices()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var devices = ScanPnPDevices().ToList();
+        // Normal iOS exposes several MI_* composite interfaces for one physical
+        // device. Collapse those interfaces before the exact-device count and before
+        // associating the single usbipd bus ID.
+        var devices = CollapsePhysicalInterfaces(ScanPnPDevices());
         MergeUsbipdBusIds(devices);
         return devices
-            .GroupBy(d => d.DeviceId, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
             .OrderByDescending(ScoreDevice)
             .ThenBy(d => d.DeviceId, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    internal static List<AppleUsbDevice> CollapsePhysicalInterfaces(IEnumerable<AppleUsbDevice> source) =>
+        source
+            .GroupBy(device => (device.VendorId, device.ProductId, device.Mode))
+            .Select(group => group
+                .OrderByDescending(device => device.IsPresent)
+                .ThenByDescending(device => !string.IsNullOrWhiteSpace(device.Service))
+                .ThenBy(device => device.DeviceId, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .ToList();
 
     private void PollSafe(bool waitForTurn)
     {

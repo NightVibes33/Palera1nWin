@@ -51,6 +51,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public SettingsViewModel SettingsVm { get; }
     public AboutViewModel About { get; }
     public HardwareOperationCoordinator HardwareOperations => _hardwareOperations;
+    public AppleUsbMonitor UsbMonitor => _monitor;
+    public AppSettings Settings => _settings;
     public HardwareOperationState ActiveHardwareOperation => _hardwareOperations.Current;
     public bool IsHardwareBusy => ActiveHardwareOperation.IsBusy;
     public RelayCommand RestartAsAdminCommand { get; }

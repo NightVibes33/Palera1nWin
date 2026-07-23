@@ -26,10 +26,10 @@ public sealed class AppleUsbDevice
 
     public bool IsPresent =>
         !string.IsNullOrWhiteSpace(DeviceId) &&
-        !string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase) &&
-        // Pongo often enumerates as Status=Error until libusbK/WinUSB binds — still real hardware.
-        (ProductId == 0x4141 ||
-         !string.Equals(Status, "Error", StringComparison.OrdinalIgnoreCase));
+        (Mode is DeviceMode.Normal or DeviceMode.Recovery or DeviceMode.Dfu or
+             DeviceMode.YoloDfu or DeviceMode.PwnedDfu or DeviceMode.Pongo ||
+         (!string.Equals(Status, "Unknown", StringComparison.OrdinalIgnoreCase) &&
+          !string.Equals(Status, "Error", StringComparison.OrdinalIgnoreCase)));
 
     public static AppleUsbDevice Empty { get; } = new();
 
@@ -86,6 +86,12 @@ public sealed class AppleUsbDevice
             return DeviceMode.PwnedDfu;
         }
 
+        // A known Apple PID determines the mode even while Windows reports a
+        // transient Error/Unknown driver state during USB re-enumeration.
+        if (productId is 0x1227 or 0x1222) return DeviceMode.Dfu;
+        if (productId is 0x1280 or 0x1281 or 0x1282 or 0x1283) return DeviceMode.Recovery;
+        if (productId >= 0x12A0 && productId <= 0x12AF) return DeviceMode.Normal;
+
         if (!string.IsNullOrWhiteSpace(status) &&
             !string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(status, "Present", StringComparison.OrdinalIgnoreCase))
@@ -93,14 +99,7 @@ public sealed class AppleUsbDevice
             return DeviceMode.Busy;
         }
 
-        return productId switch
-        {
-            0x12A8 or 0x12AB or 0x12A0 => DeviceMode.Normal,
-            0x1280 or 0x1281 or 0x1282 or 0x1283 => DeviceMode.Recovery,
-            0x1227 or 0x1222 => DeviceMode.Dfu,
-            0x4141 => DeviceMode.Pongo,
-            _ => DeviceMode.None,
-        };
+        return DeviceMode.None;
     }
 
     public override string ToString()

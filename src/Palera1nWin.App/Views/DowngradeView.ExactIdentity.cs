@@ -46,8 +46,10 @@ public partial class DowngradeView
         }
 
         SetBusy(true, "Test exact DFU → PongoOS", "No firmware is erased. The DFU ProductType and ECID are saved only after the complete Pongo bridge test passes.");
+        StartDowngradeDriverWatch();
         try
         {
+            await EnsureCleanDfuWithGuidanceAsync("Test DFU → Pwned/Pongo", _operationCts.Token);
             var identityTask = _monitor.WaitForModeAsync(
                 new[] { AppleDeviceMode.Dfu },
                 TimeSpan.FromMinutes(5),
@@ -104,6 +106,7 @@ public partial class DowngradeView
         }
         finally
         {
+            StopDowngradeDriverWatch();
             await lease.DisposeAsync();
             _operationCts?.Dispose();
             _operationCts = null;

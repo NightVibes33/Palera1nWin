@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -12,6 +13,9 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
     private static readonly Regex EcidPattern = new(
         @"(?im)^\s*(?:ECID|UniqueChipID)\s*:\s*(?<value>(?:0x)?[0-9a-f]+)\s*$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex NormalPidPattern = new(
+        @"PID_12A[0-9A-F]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private readonly TimeSpan _pollInterval;
     private readonly string _irecoveryPath;
@@ -111,7 +115,8 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
             const string script = "$ErrorActionPreference='Stop';" +
                 "$d=Get-PnpDevice -PresentOnly | Where-Object {$_.InstanceId -like 'USB\\VID_05AC&PID_*'} | ForEach-Object {" +
                 "$h=(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data;" +
-                "[pscustomobject]@{FriendlyName=$_.FriendlyName;InstanceId=$_.InstanceId;Service=$_.Service;HardwareIds=($h -join ';')}};" +
+                "$c=(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_ContainerId' -ErrorAction SilentlyContinue).Data;" +
+                "[pscustomobject]@{FriendlyName=$_.FriendlyName;InstanceId=$_.InstanceId;Service=$_.Service;HardwareIds=($h -join ';');ContainerId=($c -join ';')}};" +
                 "$d | ConvertTo-Json -Compress";
 
             var output = await RunCaptureAsync(
@@ -125,7 +130,12 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
             var items = document.RootElement.ValueKind == JsonValueKind.Array
                 ? document.RootElement.EnumerateArray().ToArray()
                 : [document.RootElement];
-            var devices = items.Select(Parse)
+            var devices = items
+                .GroupBy(PhysicalPnpKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(item => Priority(Parse(item).Mode))
+                    .First())
+                .Select(Parse)
                 .Where(snapshot => snapshot.Mode != AppleDeviceMode.Unknown)
                 .OrderByDescending(snapshot => Priority(snapshot.Mode))
                 .ThenBy(snapshot => snapshot.InstanceId, StringComparer.OrdinalIgnoreCase)
@@ -198,7 +208,7 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
             return snapshot with
             {
                 ProductType = productMatch.Success ? NormalizeProductType(productMatch.Value) : snapshot.ProductType,
-                Ecid = ecid.Success ? AppleDeviceSnapshot.NormalizeEcid(ecid.Value) : snapshot.Ecid,
+                Ecid = ecid.Success ? NormalizeIDeviceInfoEcid(ecid.Value) : snapshot.Ecid,
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -286,6 +296,26 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
         return output.Trim();
     }
 
+    private static string PhysicalPnpKey(JsonElement item)
+    {
+        var container = Get(item, "ContainerId");
+        return !string.IsNullOrWhiteSpace(container)
+            ? "container:" + container.Trim().ToUpperInvariant()
+            : "instance:" + (Get(item, "InstanceId") ?? Guid.NewGuid().ToString("N"));
+    }
+
+    internal static string? NormalizeIDeviceInfoEcid(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return AppleDeviceSnapshot.NormalizeEcid(trimmed);
+        if (trimmed.All(char.IsDigit) &&
+            ulong.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var decimalValue))
+            return decimalValue.ToString("X", CultureInfo.InvariantCulture);
+        return AppleDeviceSnapshot.NormalizeEcid(trimmed);
+    }
+
     private static AppleDeviceSnapshot Parse(JsonElement item)
     {
         var instanceId = Get(item, "InstanceId");
@@ -297,7 +327,7 @@ public sealed class AppleDeviceMonitor : IAsyncDisposable
             var text when text.Contains("PID_1227") => AppleDeviceMode.Dfu,
             var text when text.Contains("PID_4141") => AppleDeviceMode.Pongo,
             var text when text.Contains("PID_1280") || text.Contains("PID_1281") || text.Contains("PID_1282") || text.Contains("PID_1283") => AppleDeviceMode.Recovery,
-            var text when text.Contains("PID_12A8") || text.Contains("PID_12AA") || text.Contains("PID_12AB") || text.Contains("PID_12A0") => AppleDeviceMode.Normal,
+            var text when NormalPidPattern.IsMatch(text) => AppleDeviceMode.Normal,
             _ => AppleDeviceMode.Unknown,
         };
         return new AppleDeviceSnapshot(

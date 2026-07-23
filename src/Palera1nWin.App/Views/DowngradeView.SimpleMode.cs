@@ -257,8 +257,10 @@ public partial class DowngradeView
             }
 
             SetBusy(true, "Start Downgrade", "Enter clean DFU on the validated device. The app will continue automatically.");
+            StartDowngradeDriverWatch();
             try
             {
+                await EnsureCleanDfuWithGuidanceAsync("Start Downgrade", _operationCts.Token);
                 var session = await _orchestrator.RunFullDowngradeAsync(
                     inspection.Path,
                     destructiveOperationConfirmed: true,
@@ -294,6 +296,7 @@ public partial class DowngradeView
             }
             finally
             {
+                StopDowngradeDriverWatch();
                 await lease.DisposeAsync();
                 _operationCts?.Dispose();
                 _operationCts = null;
@@ -366,8 +369,10 @@ public partial class DowngradeView
         }
 
         SetBusy(true, "Test DFU → Pwned/Pongo", "Enter clean DFU. This test does not erase firmware.");
+        StartDowngradeDriverWatch();
         try
         {
+            await EnsureCleanDfuWithGuidanceAsync("Test DFU → Pwned/Pongo", _operationCts.Token);
             var identity = await _orchestrator.ValidateDfuToPongoAsync(
                 new Progress<RestoreProgress>(HandleEnhancedProgress),
                 AppendLog,
@@ -394,6 +399,7 @@ public partial class DowngradeView
         }
         finally
         {
+            StopDowngradeDriverWatch();
             await lease.DisposeAsync();
             _operationCts?.Dispose();
             _operationCts = null;

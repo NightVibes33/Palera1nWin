@@ -10,6 +10,7 @@ using DarkSwordRestore.Core;
 using Microsoft.Win32;
 using Palera1nWin.App.Services;
 using Palera1nWin.App.ViewModels;
+using Palera1nWin.Core.Drivers;
 
 namespace Palera1nWin.App.Views;
 
@@ -34,6 +35,8 @@ public partial class DowngradeView : UserControl, IDisposable
     private bool _busy;
     private bool _started;
     private bool _disposed;
+    private MainViewModel? _shell;
+    private LibusbKWatchdog? _downgradeDriverWatch;
 
     public DowngradeView()
     {
@@ -59,10 +62,11 @@ public partial class DowngradeView : UserControl, IDisposable
         WireDowngradeExperienceHooks();
         InitializeUiHardening();
 
+        DataContextChanged += (_, args) => _shell = args.NewValue as MainViewModel;
         Loaded += DowngradeView_Loaded;
     }
 
-    private MainViewModel? Shell => DataContext as MainViewModel;
+    private MainViewModel? Shell => _shell ?? DataContext as MainViewModel;
 
     private async void DowngradeView_Loaded(object sender, RoutedEventArgs e)
     {
@@ -577,13 +581,39 @@ public partial class DowngradeView : UserControl, IDisposable
             File.AppendAllText(_logPath, formatted + Environment.NewLine);
         }
 
+        var isError = line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                      line.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                      line.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+                      line.Contains("blocked", StringComparison.OrdinalIgnoreCase) ||
+                      line.Contains("stop", StringComparison.OrdinalIgnoreCase);
+        _shell?.AppendLog("downgrade", line, isError);
+
         Dispatcher.BeginInvoke(() =>
         {
             LogBox.AppendText(formatted + Environment.NewLine);
             LogBox.ScrollToEnd();
-            Shell?.AppendLog("darksword", line, line.Contains("error", StringComparison.OrdinalIgnoreCase));
         });
     }
+
+    private void StartDowngradeDriverWatch()
+    {
+        StopDowngradeDriverWatch();
+        if (Shell is null) return;
+        _downgradeDriverWatch = new LibusbKWatchdog(Shell.UsbMonitor, Shell.Settings);
+        _downgradeDriverWatch.LogReceived += DowngradeDriverWatch_LogReceived;
+        _downgradeDriverWatch.Start();
+    }
+
+    private void StopDowngradeDriverWatch()
+    {
+        if (_downgradeDriverWatch is null) return;
+        _downgradeDriverWatch.LogReceived -= DowngradeDriverWatch_LogReceived;
+        _downgradeDriverWatch.Dispose();
+        _downgradeDriverWatch = null;
+    }
+
+    private void DowngradeDriverWatch_LogReceived(object? sender, Palera1nWin.Core.Models.LogLine line) =>
+        AppendLog($"[{line.Source}] {line.Message}");
 
     private void SetShellStatus(string text) => Shell?.SetStatusText(text);
 
@@ -615,6 +645,7 @@ public partial class DowngradeView : UserControl, IDisposable
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _operationCts = null;
+        StopDowngradeDriverWatch();
         _monitor.DeviceChanged -= Monitor_DeviceChanged;
         try
         {
