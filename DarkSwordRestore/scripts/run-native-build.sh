@@ -130,16 +130,24 @@ old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
 '''
-new_openra1n = '''python "$ROOT/scripts/patch-openra1n.py" openra1n.c
+new_openra1n = '''PALERA1N_PONGO_URL="https://cdn.nickchan.lol/palera1n/artifacts/kpf/iOS15/Pongo.bin"
+PALERA1N_PONGO="$BUILD/openra1n/payloads/Pongo.bin"
+curl --fail --location --retry 3 --retry-all-errors "$PALERA1N_PONGO_URL" --output "$PALERA1N_PONGO"
+PONGO_SIZE="$(wc -c < "$PALERA1N_PONGO" | tr -d ' ')"
+PONGO_SHA256="$(sha256sum "$PALERA1N_PONGO" | awk '{print $1}')"
+echo "palera1n-ios15-pongo-size=$PONGO_SIZE"
+echo "palera1n-ios15-pongo-sha256=$PONGO_SHA256"
+[[ "$PONGO_SIZE" = "238096" ]] || { echo "Unexpected official iOS 15 Pongo size: $PONGO_SIZE" >&2; exit 9; }
+python "$ROOT/scripts/patch-openra1n.py" openra1n.c
 sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
 grep -q '^BIN = openra1n.exe$' Makefile
 make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n-core.exe"
 popd
 
-gcc -std=c11 -O2 -Wall -Wextra -municode \
-  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \
-  -o "$STAGE/openra1n.exe" \
+gcc -std=c11 -O2 -Wall -Wextra -municode \\
+  "$ROOT/native/openra1n-wrapper/openra1n_wrapper.c" \\
+  -o "$STAGE/openra1n.exe" \\
   -lsetupapi
 '''
 if old_openra1n not in text:
