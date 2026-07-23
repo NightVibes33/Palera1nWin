@@ -24,7 +24,7 @@ public enum OnboardingSection
 
 public static class OnboardingStateStore
 {
-    public const int CurrentContentVersion = 1;
+    public const int CurrentContentVersion = 2;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -38,8 +38,18 @@ public static class OnboardingStateStore
         try
         {
             if (!File.Exists(FilePath)) return new OnboardingState();
-            var state = JsonSerializer.Deserialize<OnboardingState>(File.ReadAllText(FilePath), JsonOptions);
-            return state ?? new OnboardingState();
+            var state = JsonSerializer.Deserialize<OnboardingState>(File.ReadAllText(FilePath), JsonOptions)
+                ?? new OnboardingState();
+
+            if (state.CompletedContentVersion < CurrentContentVersion)
+            {
+                state.JailbreakGuideCompleted = false;
+                state.DowngradeGuideCompleted = false;
+                state.ColdBootGuideCompleted = false;
+                state.CompletedAt = null;
+            }
+
+            return state;
         }
         catch
         {
