@@ -12,10 +12,10 @@
     <ApplicationIcon Condition="Exists('..\..\assets\icon.ico')">..\..\assets\icon.ico</ApplicationIcon>
     <!-- The two nested API DTOs redeclare non-null collection properties whose
          JSON names already match case-insensitively. WPF's temporary project
-         reports the redundant primary-constructor property target as CS0657;
-         keep every other warning fatal while this harmless compiler diagnostic
-         remains visible but non-fatal. -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0657</WarningsNotAsErrors>
+         reports the redundant primary-constructor property target as CS0657.
+         Suppress only that compiler diagnostic so self-contained publish can keep
+         TreatWarningsAsErrors enabled for every actionable warning. -->
+    <NoWarn>$(NoWarn);CS0657</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Palera1nWin.Core\Palera1nWin.Core.csproj" />
