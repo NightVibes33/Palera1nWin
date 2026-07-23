@@ -130,41 +130,7 @@ old_openra1n = '''make LIBUSB=1
 cp openra1n.exe "$STAGE/openra1n.exe"
 popd
 '''
-new_openra1n = '''python - openra1n.c <<'PY_OPENRA1N'
-from pathlib import Path
-path = Path("openra1n.c")
-source = path.read_text(encoding="utf-8")
-old = """int main(int argc, char **argv) {
-\tLOG_RAINBOW("-=-=- openra1n -=-=-");
-\tint ret = EXIT_FAILURE;
-\tusb_handle_t handle;
-\tusb_timeout = 5;
-\tusb_abort_timeout_min = 0;
-\tLOG_INFO("Waiting for DFU mode device");
-\tgaster_checkm8(&handle);
-\tsleep_ms(3000);
-\tcheckm8_boot_pongo(&handle);
-\treturn ret;
-}"""
-new = """int main(int argc, char **argv) {
-\tLOG_RAINBOW("-=-=- openra1n -=-=-");
-\tusb_handle_t handle;
-\tusb_timeout = 5;
-\tusb_abort_timeout_min = 0;
-\tLOG_INFO("Waiting for DFU mode device");
-\tif(!gaster_checkm8(&handle)) {
-\t\tLOG_ERROR("checkm8 did not reach pwned DFU");
-\t\treturn EXIT_FAILURE;
-\t}
-\tsleep_ms(3000);
-\tcheckm8_boot_pongo(&handle);
-\tLOG_INFO("PongoOS payload sent; Windows may temporarily show the device as disconnected while 05AC:4141 enumerates");
-\treturn EXIT_SUCCESS;
-}"""
-if old not in source:
-    raise SystemExit("Pinned openra1n main function changed; refusing an unreviewed patch")
-path.write_text(source.replace(old, new, 1), encoding="utf-8", newline="\n")
-PY_OPENRA1N
+new_openra1n = '''python "$ROOT/scripts/patch-openra1n.py" openra1n.c
 sed -i 's/^BIN = openra1n$/BIN = openra1n.exe/' Makefile
 grep -q '^BIN = openra1n.exe$' Makefile
 make LIBUSB=1
