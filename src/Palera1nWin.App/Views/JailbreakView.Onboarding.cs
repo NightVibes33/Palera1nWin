@@ -24,21 +24,23 @@ public partial class JailbreakView
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock
         {
-            Text = "Jailbreak onboarding",
+            Text = "Jailbreak quick guide",
             FontSize = 18,
             FontWeight = FontWeights.SemiBold,
+            Foreground = FindBrush("Brush.Text", Brushes.White),
         });
         panel.Children.Add(new TextBlock
         {
-            Text = "Use this workflow to jailbreak the firmware already installed on the device. It does not downgrade or erase the device.",
+            Text = "Use Jailbreak to keep the firmware already installed and start palera1n. This workflow does not downgrade the device.",
             Margin = new Thickness(0, 5, 0, 12),
             Foreground = FindBrush("Brush.TextSecondary", Brushes.LightGray),
             TextWrapping = TextWrapping.Wrap,
+            LineHeight = 20,
         });
-        panel.Children.Add(CreateJailbreakStep("1", "Complete Setup and run the app as Administrator."));
-        panel.Children.Add(CreateJailbreakStep("2", "Choose Rootless unless you specifically need Rootful; Safe Mode disables tweak injection."));
-        panel.Children.Add(CreateJailbreakStep("3", "Press Start Jailbreak and follow the timed DFU instructions. The screen must remain black."));
-        panel.Children.Add(CreateJailbreakStep("4", "After a full reboot, return here and run Start Jailbreak again to re-enable the jailbreak."));
+        panel.Children.Add(CreateJailbreakStep("1", "Run Palera1nWin as Administrator, complete Setup, and connect only the target Apple device."));
+        panel.Children.Add(CreateJailbreakStep("2", "Choose Rootless unless you specifically need Rootful. Safe Mode disables tweak injection."));
+        panel.Children.Add(CreateJailbreakStep("3", "Press Start Jailbreak and follow the timed DFU guide. A correct DFU screen remains completely black."));
+        panel.Children.Add(CreateJailbreakStep("4", "After a full reboot, return to Jailbreak and press Start Jailbreak again to reactivate it."));
 
         _jailbreakOnboardingStatus = new TextBlock
         {
@@ -49,12 +51,8 @@ public partial class JailbreakView
         UpdateJailbreakOnboardingStatus();
         panel.Children.Add(_jailbreakOnboardingStatus);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(0, 14, 0, 0),
-        };
-        var openGuide = CreateInlineButton("Open Full Jailbreak Guide", true);
+        var buttons = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+        var openGuide = CreateInlineButton("Open Full Guide", true);
         openGuide.Click += (_, _) => OnboardingWindow.ShowFor(this, OnboardingSection.Jailbreak);
         var markRead = CreateInlineButton("Mark Guide Read", false);
         markRead.Margin = new Thickness(8, 0, 0, 0);
@@ -71,14 +69,15 @@ public partial class JailbreakView
         var card = new Border
         {
             Tag = "jailbreak-onboarding",
-            Background = FindBrush("ControlFillColorSecondaryBrush", new SolidColorBrush(Color.FromRgb(35, 40, 48))),
-            BorderBrush = FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(67, 210, 194))),
+            BorderBrush = FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(45, 212, 191))),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(16),
             Margin = new Thickness(0, 18, 0, 0),
             Child = panel,
         };
+        ProgrammaticTheme.ApplyCard(this, card);
+        card.BorderBrush = FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(45, 212, 191)));
 
         root.Children.Insert(Math.Min(2, root.Children.Count), card);
     }
@@ -93,7 +92,7 @@ public partial class JailbreakView
             Width = 22,
             Height = 22,
             CornerRadius = new CornerRadius(11),
-            Background = FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(67, 210, 194))),
+            Background = FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(45, 212, 191))),
             Child = new TextBlock
             {
                 Text = number,
@@ -108,6 +107,7 @@ public partial class JailbreakView
         var detail = new TextBlock
         {
             Text = text,
+            Foreground = FindBrush("Brush.Text", Brushes.White),
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -123,16 +123,16 @@ public partial class JailbreakView
             Content = content,
             Padding = new Thickness(14, 7, 14, 7),
             Background = primary
-                ? FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(67, 210, 194)))
-                : FindBrush("ControlFillColorSecondaryBrush", new SolidColorBrush(Color.FromRgb(35, 40, 48))),
-            Foreground = primary ? Brushes.Black : Brushes.White,
-            BorderBrush = FindBrush("ControlStrokeColorDefaultBrush", Brushes.DimGray),
+                ? FindBrush("Brush.Accent", new SolidColorBrush(Color.FromRgb(45, 212, 191)))
+                : FindBrush("Brush.SurfaceTertiary", new SolidColorBrush(Color.FromRgb(35, 42, 58))),
+            Foreground = primary ? Brushes.Black : FindBrush("Brush.Text", Brushes.White),
+            BorderBrush = FindBrush("Brush.Border", Brushes.DimGray),
             BorderThickness = new Thickness(1),
             FontWeight = FontWeights.SemiBold,
         };
     }
 
-    private Brush FindBrush(string key, Brush fallback) => TryFindResource(key) as Brush ?? fallback;
+    private Brush FindBrush(string key, Brush fallback) => ProgrammaticTheme.Brush(this, key, fallback);
 
     private void UpdateJailbreakOnboardingStatus()
     {
@@ -140,7 +140,7 @@ public partial class JailbreakView
         var complete = OnboardingStateStore.Load().JailbreakGuideCompleted;
         _jailbreakOnboardingStatus.Text = complete
             ? "Guide status: Read. You can reopen it at any time."
-            : "Guide status: Not marked read. Review it before the first jailbreak attempt.";
+            : "Guide status: Review recommended before the first jailbreak attempt.";
         _jailbreakOnboardingStatus.Foreground = complete
             ? FindBrush("Brush.Success", Brushes.LightGreen)
             : FindBrush("Brush.Accent", Brushes.Aquamarine);
