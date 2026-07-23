@@ -1,7 +1,8 @@
-﻿using System.IO;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
+using Palera1nWin.App.Services;
 using Palera1nWin.App.ViewModels;
 using Palera1nWin.App.Views;
 using Palera1nWin.Core.Security;
@@ -142,6 +143,7 @@ public partial class App : Application
 
         DowngradeView? view = null;
         Window? host = null;
+        OnboardingWindow? onboarding = null;
         try
         {
             ApplicationAccentColorManager.Apply(
@@ -177,7 +179,27 @@ public partial class App : Application
                     throw new InvalidOperationException($"Downgrade operational control {fieldName} was not initialized.");
             }
 
-            File.WriteAllText(resultPath, "PASS: Downgrade tab Loaded, log, timer, and operational dashboard initialization completed.");
+            onboarding = new OnboardingWindow(new OnboardingState(), navigate: null)
+            {
+                Left = -20000,
+                Top = -20000,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+            };
+            onboarding.Show();
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+
+            if (!string.Equals(onboarding.Title, "Palera1nWin Setup Guide", StringComparison.Ordinal))
+                throw new InvalidOperationException("The packaged onboarding window did not initialize with the expected title.");
+
+            var navigationField = typeof(OnboardingWindow).GetField("_navigationButtons", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (navigationField?.GetValue(onboarding) is not System.Collections.IDictionary navigation || navigation.Count != 4)
+                throw new InvalidOperationException("The packaged onboarding window did not expose all four guide sections.");
+
+            File.WriteAllText(
+                resultPath,
+                "PASS: Downgrade Quick Actions and the four-section onboarding window loaded without dispatcher failures.");
             return 0;
         }
         catch (Exception exception)
@@ -189,6 +211,7 @@ public partial class App : Application
         finally
         {
             DispatcherUnhandledException -= handler;
+            try { onboarding?.Close(); } catch { }
             try { host?.Close(); } catch { }
             try { view?.Dispose(); } catch { }
         }
