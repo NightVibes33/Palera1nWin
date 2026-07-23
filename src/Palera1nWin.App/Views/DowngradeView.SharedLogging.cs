@@ -12,10 +12,16 @@ public partial class DowngradeView
     private string? _lastSharedProgressLine;
     private int _fallbackMirroredLength;
 
-    protected override void OnDataContextChanged(DependencyPropertyChangedEventArgs e)
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
     {
-        base.OnDataContextChanged(e);
-        if (_sharedLoggingLoadedHooked || e.NewValue is not MainViewModel) return;
+        base.OnPropertyChanged(e);
+        if (e.Property != DataContextProperty ||
+            _sharedLoggingLoadedHooked ||
+            e.NewValue is not MainViewModel)
+        {
+            return;
+        }
+
         _sharedLoggingLoadedHooked = true;
         Loaded += SharedLogging_Loaded;
         if (IsLoaded) SharedLogging_Loaded(this, new RoutedEventArgs(LoadedEvent));
