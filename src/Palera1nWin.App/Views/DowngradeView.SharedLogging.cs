@@ -8,13 +8,17 @@ namespace Palera1nWin.App.Views;
 public partial class DowngradeView
 {
     private bool _sharedLoggingWired;
+    private bool _sharedLoggingLoadedHooked;
     private string? _lastSharedProgressLine;
     private int _fallbackMirroredLength;
 
-    protected override void OnInitialized(EventArgs e)
+    protected override void OnDataContextChanged(DependencyPropertyChangedEventArgs e)
     {
-        base.OnInitialized(e);
+        base.OnDataContextChanged(e);
+        if (_sharedLoggingLoadedHooked || e.NewValue is not MainViewModel) return;
+        _sharedLoggingLoadedHooked = true;
         Loaded += SharedLogging_Loaded;
+        if (IsLoaded) SharedLogging_Loaded(this, new RoutedEventArgs(LoadedEvent));
     }
 
     private void SharedLogging_Loaded(object sender, RoutedEventArgs e)
