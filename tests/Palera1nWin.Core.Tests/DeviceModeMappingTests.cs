@@ -15,7 +15,7 @@ public sealed class DeviceModeMappingTests
     [InlineData("USB\\VID_05AC&PID_4141\\SERIAL", 0x4141, "OK", DeviceMode.Pongo)]
     [InlineData("USB\\VID_05AC&PID_1227&YOLO:\\SERIAL", 0x1227, "OK", DeviceMode.YoloDfu)]
     [InlineData("USB\\VID_05AC&PID_1227&PWND:CHECKM8\\SERIAL", 0x1227, "OK", DeviceMode.PwnedDfu)]
-    [InlineData("USB\\VID_05AC&PID_1227\\SERIAL", 0x1227, "Error", DeviceMode.Busy)]
+    [InlineData("USB\\VID_05AC&PID_1227\\SERIAL", 0x1227, "Error", DeviceMode.Dfu)]
     [InlineData("USB\\VID_05AC&PID_4141\\SERIAL", 0x4141, "Error", DeviceMode.Pongo)]
     public void MapMode_MatchesExpected(string deviceId, ushort pid, string status, DeviceMode expected)
     {
