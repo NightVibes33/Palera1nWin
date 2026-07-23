@@ -40,8 +40,14 @@ internal static class JailbreakDfuVisualCoordinator
 
     public static Task<bool?> BeginFromNativePromptAsync(CancellationToken cancellationToken)
     {
-        if (_activeView?.TryGetTarget(out var view) != true || !view.IsLoaded)
+        var activeReference = _activeView;
+        if (activeReference is null ||
+            !activeReference.TryGetTarget(out var view) ||
+            view is null ||
+            !view.IsLoaded)
+        {
             return Task.FromResult<bool?>(null);
+        }
 
         var dispatcher = view.Dispatcher;
         if (dispatcher.CheckAccess()) return view.BeginNativePromptDfuGuideAsync(cancellationToken);
@@ -138,7 +144,7 @@ public partial class JailbreakView
         {
             if (ReferenceEquals(_detailedJailbreakDfuCts, ownedCts))
             {
-                _detailedJailbreakDfuCts.Dispose();
+                ownedCts.Dispose();
                 _detailedJailbreakDfuCts = null;
             }
         }
