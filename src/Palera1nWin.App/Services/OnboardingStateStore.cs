@@ -25,7 +25,7 @@ public enum OnboardingSection
 
 public static class OnboardingStateStore
 {
-    public const int CurrentContentVersion = 2;
+    public const int CurrentContentVersion = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
