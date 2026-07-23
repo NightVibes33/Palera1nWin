@@ -1,9 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Data;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DarkSwordRestore.Core;
@@ -29,11 +26,35 @@ internal static class DetailedDfuGuideFeature
     }
 }
 
+internal static class JailbreakDfuVisualCoordinator
+{
+    private static WeakReference<JailbreakView>? _activeView;
+
+    public static void Register(JailbreakView view) => _activeView = new WeakReference<JailbreakView>(view);
+
+    public static void Unregister(JailbreakView view)
+    {
+        if (_activeView?.TryGetTarget(out var active) == true && ReferenceEquals(active, view))
+            _activeView = null;
+    }
+
+    public static Task<bool?> BeginFromNativePromptAsync(CancellationToken cancellationToken)
+    {
+        if (_activeView?.TryGetTarget(out var view) != true || !view.IsLoaded)
+            return Task.FromResult<bool?>(null);
+
+        var dispatcher = view.Dispatcher;
+        if (dispatcher.CheckAccess()) return view.BeginNativePromptDfuGuideAsync(cancellationToken);
+        return dispatcher.InvokeAsync(
+            () => view.BeginNativePromptDfuGuideAsync(cancellationToken),
+            DispatcherPriority.Send,
+            cancellationToken).Task.Unwrap();
+    }
+}
+
 public partial class JailbreakView
 {
     private DfuGuideOverlay? _detailedJailbreakDfuOverlay;
-    private ButtonBase? _detailedJailbreakStartButton;
-    private ICommand? _detailedJailbreakStartCommand;
     private CancellationTokenSource? _detailedJailbreakDfuCts;
     private bool _detailedJailbreakGuideInitialized;
 
@@ -44,68 +65,65 @@ public partial class JailbreakView
 
         _detailedJailbreakDfuOverlay = new DfuGuideOverlay();
         _detailedJailbreakDfuOverlay.CancelRequested += DetailedJailbreakDfuOverlay_CancelRequested;
+        CorrectNativeTimingCopy(_detailedJailbreakDfuOverlay);
         WrapContentWithOverlay(_detailedJailbreakDfuOverlay);
-
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() =>
-            {
-                _detailedJailbreakStartButton = FindButtons(this)
-                    .FirstOrDefault(button =>
-                        string.Equals(button.Content?.ToString(), "Start Jailbreak", StringComparison.Ordinal));
-                if (_detailedJailbreakStartButton is null) return;
-
-                _detailedJailbreakStartCommand = _detailedJailbreakStartButton.Command;
-                _detailedJailbreakStartButton.Command = null;
-                _detailedJailbreakStartButton.Click += DetailedJailbreakStartButton_Click;
-                _detailedJailbreakStartButton.SetBinding(
-                    UIElement.IsEnabledProperty,
-                    new Binding(nameof(JailbreakViewModel.CanStartJailbreak)));
-            }));
+        JailbreakDfuVisualCoordinator.Register(this);
+        Unloaded += DetailedJailbreakView_Unloaded;
     }
 
-    private async void DetailedJailbreakStartButton_Click(object sender, RoutedEventArgs e)
+    internal async Task<bool?> BeginNativePromptDfuGuideAsync(CancellationToken cancellationToken)
     {
-        if (_detailedJailbreakDfuCts is not null ||
-            _detailedJailbreakStartButton is null ||
-            _detailedJailbreakStartCommand is null ||
-            _detailedJailbreakStartButton.DataContext is not JailbreakViewModel viewModel)
-        {
-            return;
-        }
+        if (_detailedJailbreakDfuOverlay is null || DataContext is not JailbreakViewModel viewModel)
+            return null;
+        if (IsDfuOrPongo(viewModel.DeviceModeLabel)) return true;
 
-        if (!_detailedJailbreakStartCommand.CanExecute(null)) return;
-        if (IsDfuOrPongo(viewModel.DeviceModeLabel))
-        {
-            _detailedJailbreakStartCommand.Execute(null);
-            return;
-        }
+        _detailedJailbreakDfuCts?.Cancel();
+        _detailedJailbreakDfuCts?.Dispose();
+        _detailedJailbreakDfuCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var ownedCts = _detailedJailbreakDfuCts;
+        var token = ownedCts.Token;
+        var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _detailedJailbreakDfuCts = new CancellationTokenSource();
-        _detailedJailbreakStartButton.IsEnabled = false;
-        var token = _detailedJailbreakDfuCts.Token;
+        // This project is currently physically targeting iPad6,11/iPad6,12, which use
+        // the Home + Top/Power path in palera1n's native dfuhelper.
         var profile = DfuGuideButtonProfile.Home;
-        _detailedJailbreakDfuOverlay!.Open(profile);
+        _detailedJailbreakDfuOverlay.Open(profile);
+        _ = RunNativePromptSequenceAsync(viewModel, profile, ready, ownedCts);
 
+        using var registration = cancellationToken.Register(() =>
+        {
+            ownedCts.Cancel();
+            ready.TrySetResult(false);
+        });
+        return await ready.Task.ConfigureAwait(true);
+    }
+
+    private async Task RunNativePromptSequenceAsync(
+        JailbreakViewModel viewModel,
+        DfuGuideButtonProfile profile,
+        TaskCompletionSource<bool> ready,
+        CancellationTokenSource ownedCts)
+    {
         try
         {
             var detected = await DfuGuideSequence.RunAsync(
                 profile,
                 () => IsDfuOrPongo(viewModel.DeviceModeLabel),
-                frame => _detailedJailbreakDfuOverlay.Apply(frame),
-                token);
+                frame => _detailedJailbreakDfuOverlay?.Apply(frame),
+                ownedCts.Token,
+                holdSequenceStarting: () => ready.TrySetResult(true));
 
-            if (!detected) return;
-            await Task.Delay(650, token);
-            _detailedJailbreakDfuOverlay.Close();
-            if (_detailedJailbreakStartCommand.CanExecute(null))
+            if (!ready.Task.IsCompleted) ready.TrySetResult(detected);
+            if (detected)
             {
-                _detailedJailbreakStartCommand.Execute(null);
+                await Task.Delay(650, ownedCts.Token);
+                _detailedJailbreakDfuOverlay?.Close();
             }
         }
         catch (OperationCanceledException)
         {
-            _detailedJailbreakDfuOverlay.Apply(new DfuGuideFrame(
+            ready.TrySetResult(false);
+            _detailedJailbreakDfuOverlay?.Apply(new DfuGuideFrame(
                 DfuGuidePhase.Cancelled,
                 profile,
                 "GUIDE CANCELLED",
@@ -117,20 +135,28 @@ public partial class JailbreakView
                 false,
                 false,
                 false));
-            _detailedJailbreakDfuOverlay.Close();
+            _detailedJailbreakDfuOverlay?.Close();
         }
         finally
         {
-            _detailedJailbreakDfuCts?.Dispose();
-            _detailedJailbreakDfuCts = null;
-            _detailedJailbreakStartButton.GetBindingExpression(UIElement.IsEnabledProperty)?.UpdateTarget();
+            if (ReferenceEquals(_detailedJailbreakDfuCts, ownedCts))
+            {
+                _detailedJailbreakDfuCts.Dispose();
+                _detailedJailbreakDfuCts = null;
+            }
         }
     }
 
-    private void DetailedJailbreakDfuOverlay_CancelRequested(object? sender, EventArgs e)
-    {
+    private void DetailedJailbreakDfuOverlay_CancelRequested(object? sender, EventArgs e) =>
         _detailedJailbreakDfuCts?.Cancel();
-        _detailedJailbreakDfuOverlay?.Close();
+
+    private void DetailedJailbreakView_Unloaded(object sender, RoutedEventArgs e)
+    {
+        JailbreakDfuVisualCoordinator.Unregister(this);
+        _detailedJailbreakDfuCts?.Cancel();
+        _detailedJailbreakDfuCts?.Dispose();
+        _detailedJailbreakDfuCts = null;
+        Unloaded -= DetailedJailbreakView_Unloaded;
     }
 
     private static bool IsDfuOrPongo(string label) =>
@@ -147,14 +173,11 @@ public partial class JailbreakView
         Content = root;
     }
 
-    private static IEnumerable<ButtonBase> FindButtons(DependencyObject root)
+    private static void CorrectNativeTimingCopy(DependencyObject root)
     {
+        if (root is TextBlock { Text: "8-second hold" } text) text.Text = "4-second hold";
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-        {
-            var child = VisualTreeHelper.GetChild(root, index);
-            if (child is ButtonBase button) yield return button;
-            foreach (var nested in FindButtons(child)) yield return nested;
-        }
+            CorrectNativeTimingCopy(VisualTreeHelper.GetChild(root, index));
     }
 }
 
@@ -170,6 +193,7 @@ public partial class DowngradeView
 
         _detailedDowngradeDfuOverlay = new DfuGuideOverlay();
         _detailedDowngradeDfuOverlay.CancelRequested += (_, _) => _dfuGuideCts?.Cancel();
+        JailbreakView.CorrectNativeTimingCopy(_detailedDowngradeDfuOverlay);
         WrapDowngradeContentWithOverlay(_detailedDowngradeDfuOverlay);
 
         StartDfuGuideButton.Click -= StartDfuGuide_Click;
